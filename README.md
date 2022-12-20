@@ -20,8 +20,8 @@ achieving a state-of-the-art FID of 2.27 on the latter.
 
 This repository contains:
 
-* 🪐 A simple PyTorch implementation of DiT
-* ⚡️ Pre-trained class-conditional DiT models train on ImageNet (512x512 and 256x256)
+* 🪐 A simple PyTorch [implementation](models.py) of DiT
+* ⚡️ Pre-trained class-conditional DiT models trained on ImageNet (512x512 and 256x256)
 * 💥 A self-contained [Colab notebook](http://colab.research.google.com/github/facebookresearch/DiT/blob/main/run_DiT.ipynb) for running pre-trained DiT-XL/2 models
 
 
