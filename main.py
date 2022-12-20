@@ -20,7 +20,7 @@ num_sampling_steps = 250
 cfg_scale = 4.0
 
 # Load model:
-image_size = 512
+image_size = 256
 assert image_size in [256, 512], "We only provide pre-trained models for 256x256 and 512x512 resolutions."
 latent_size = image_size // 8
 model = DiT_XL_2(input_size=latent_size).to(device)
