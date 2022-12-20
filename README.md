@@ -35,7 +35,7 @@ cd DiT
 ```
 
 We provide an [`environment.yml`](environment.yml) file that can be used to create a Conda environment. If you only want 
-to run the models locally on CPU, you can remove the `cudatoolkit` requirement from the file.
+to run the models locally on CPU, you can remove the `cudatoolkit` and `pytorch-cuda` requirements from the file.
 
 ```bash
 conda env create -f environment.yml

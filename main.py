@@ -20,18 +20,22 @@ num_sampling_steps = 250
 cfg_scale = 4.0
 
 # Load model:
-model = DiT_XL_2().to(device)
-state_dict = find_model("DiT-XL-2-256x256.pt")
+image_size = 512
+assert image_size in [256, 512], "We only provide pre-trained models for 256x256 and 512x512 resolutions."
+latent_size = image_size // 8
+model = DiT_XL_2(input_size=latent_size).to(device)
+state_dict = find_model(f"DiT-XL-2-{image_size}x{image_size}.pt")
 model.load_state_dict(state_dict)
 model.eval()
 diffusion = create_diffusion(str(num_sampling_steps))
 vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(device)
 
+# Labels to condition the model with:
 class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
 
 # Create sampling noise:
 n = len(class_labels)
-z = torch.randn(n, 4, 32, 32, device=device)
+z = torch.randn(n, 4, latent_size, latent_size, device=device)
 y = torch.tensor(class_labels, device=device)
 
 # Setup classifier-free guidance:
