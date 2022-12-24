@@ -100,7 +100,7 @@ class LabelEmbedder(nn.Module):
 
 class DiTBlock(nn.Module):
     """
-    A DiT block with gated adaptive layer norm (adaLN) conditioning.
+    A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
