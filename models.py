@@ -254,7 +254,7 @@ class DiT(nn.Module):
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
         model_out = self.forward(combined, t, y)
-        eps, rest = model_out[:, :3], model_out[:, 3:]
+        eps, rest = model_out[:, :4], model_out[:, 4:]
         cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
