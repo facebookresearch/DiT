@@ -24,6 +24,8 @@ This repository contains:
 * ⚡️ Pre-trained class-conditional DiT models trained on ImageNet (512x512 and 256x256)
 * 💥 A self-contained [Hugging Face Space](https://huggingface.co/spaces/wpeebles/DiT) and [Colab notebook](http://colab.research.google.com/github/facebookresearch/DiT/blob/main/run_DiT.ipynb) for running pre-trained DiT-XL/2 models
 
+An implementation of DiT directly in Hugging Face `diffusers` can also be found [here](https://github.com/huggingface/diffusers/blob/main/docs/source/en/api/pipelines/dit.mdx).
+
 
 ## Setup
 
