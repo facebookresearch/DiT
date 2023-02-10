@@ -66,9 +66,9 @@ For convenience, our pre-trained DiT models can be downloaded directly here as w
 | [XL/2](https://dl.fbaipublicfiles.com/DiT/models/DiT-XL-2-512x512.pt) | 512x512          | 3.04    | 240.82          | 525    |
 
 
-**Custom DiT checkpoints.** If you've trained a new DiT model with [`train.py`](train.py) (see [below](#training-dit)), you can use the `--ckpt`
-argument in [`sample.py`](sample.py) to use your own checkpoint instead. For example, to sample from the EMA weights of a custom 
-256x256 DiT-L/4 model, you can use:
+**Custom DiT checkpoints.** If you've trained a new DiT model with [`train.py`](train.py) (see [below](#training-dit)), you can add the `--ckpt`
+argument to use your own checkpoint instead. For example, to sample from the EMA weights of a custom 
+256x256 DiT-L/4 model, run:
 
 ```python
 python sample.py --model DiT-L/4 --image-size 256 --ckpt /path/to/model.pt
