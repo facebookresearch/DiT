@@ -195,6 +195,7 @@ class DiT(nn.Module):
         # Initialize patch_embed like nn.Linear (instead of nn.Conv2d):
         w = self.x_embedder.proj.weight.data
         nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        nn.init.constant_(self.x_embedder.proj.bias, 0)
 
         # Initialize label embedding table:
         nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
