@@ -112,6 +112,12 @@ def center_crop_arr(pil_image, image_size):
     crop_x = (arr.shape[1] - image_size) // 2
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
+def _ddp_dict(_dict):
+    new_dict = {}
+    for k in _dict:
+        new_dict['module.' + k] = _dict[k]
+    return new_dict
+
 
 #################################################################################
 #                                  Training Loop                                #
