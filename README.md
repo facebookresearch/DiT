@@ -100,6 +100,11 @@ similar (and sometimes slightly better) results compared to the JAX-trained mode
 These models were trained at 256x256 resolution; we used 8x A100s to train XL/2 and 4x A100s to train B/4. Note that FID 
 here is computed with 250 DDPM sampling steps, with the `mse` VAE decoder and without guidance (`cfg-scale=1`). 
 
+**TF32 Note (important for A100 users).** When we ran the above tests, TF32 matmuls were disabled per PyTorch's defaults. 
+We've enabled them at the top of `train.py` and `sample.py` because it makes training and sampling way way way faster on 
+A100s (and should for other Ampere GPUs too), but note that the use of TF32 may lead to some differences compared to 
+the above results.
+
 ### Enhancements
 Training (and sampling) could likely be sped-up significantly by:
 - [ ] using [Flash Attention](https://github.com/HazyResearch/flash-attention) in the DiT model
