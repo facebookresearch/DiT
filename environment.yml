@@ -11,3 +11,4 @@ dependencies:
       - timm
       - diffusers
       - accelerate
+      - gradio
