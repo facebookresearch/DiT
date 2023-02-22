@@ -1,16 +1,37 @@
+from io import BytesIO
+
 import torch
 import math
+import requests
 
 import torch.nn as nn
 import numpy as np
+from PIL import Image
 
 from timm.models.vision_transformer import Attention, Mlp
-
 
 #################################################################################
 #                   Sine/Cosine Positional Embedding Functions                  #
 #################################################################################
 # https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
+from torchvision.transforms import transforms
+
+from modules.training_utils import center_crop_arr
+
+transform = transforms.Compose([
+    transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, 256)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+])
+
+
+def process_input(data_dict):
+    text, imgs = data_dict["TEXT"], data_dict["URL"]
+    imgs = [Image.open(BytesIO(requests.get(img).content)) for img in imgs]
+    imgs = [transform(img) for img in imgs]
+    return text, torch.stack(imgs)
+
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
     """

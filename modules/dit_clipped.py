@@ -1,14 +1,15 @@
 import torch
 
 import torch.nn as nn
+import pytorch_lightning as pl
 
 from timm.models.vision_transformer import PatchEmbed
 
 from modules.encoders.modules import FrozenCLIPTextEmbedder
-from modules.utils import TimestepEmbedder, LabelEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed
+from modules.utils import TimestepEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed, process_input
 
 
-class DiT_Clipped(nn.Module):
+class DiT_Clipped(pl.LightningModule):
     """
     Diffusion model with a Transformer backbone and clip encoder.
     """
@@ -23,7 +24,6 @@ class DiT_Clipped(nn.Module):
             num_heads=16,
             mlp_ratio=4.0,
             class_dropout_prob=0.1,
-            num_classes=1000,
             learn_sigma=True,
             clip_version='ViT-L/14'
     ):
@@ -36,7 +36,6 @@ class DiT_Clipped(nn.Module):
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
-        self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
         num_patches = self.x_embedder.num_patches
         # Will use fixed sin-cos embedding:
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
@@ -72,9 +71,6 @@ class DiT_Clipped(nn.Module):
         w = self.x_embedder.proj.weight.data
         nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
         nn.init.constant_(self.x_embedder.proj.bias, 0)
-
-        # Initialize label embedding table:
-        nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
 
         # Initialize timestep embedding MLP:
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
@@ -119,7 +115,6 @@ class DiT_Clipped(nn.Module):
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)  # (N, D)
-        # y = self.y_embedder(y, self.training)  # (N, D)
         c = t + y  # (N, D)
         for block in self.blocks:
             x = block(x, c)  # (N, T, D)
@@ -144,3 +139,35 @@ class DiT_Clipped(nn.Module):
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=0)
+        return optimizer
+
+    def training_step(self, train_batch, batch_idx):
+        text, img = process_input(train_batch)
+        with torch.no_grad():
+            x = self.vae.encode(img.to(self.device)).latent_dist.sample().mul_(0.18215)
+        t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
+
+        y = self.encode(text).squeeze(1).to(self.device)
+
+        model_kwargs = dict(y=y)
+        loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)
+        loss = loss_dict["loss"].mean()
+        self.log("train_loss", loss)
+        return loss
+
+    # def validation_step(self, val_batch, batch_idx):
+    #     x, y = val_batch
+    #     with torch.no_grad():
+    #         x = self.vae.encode(x).latent_dist.sample().mul_(0.18215)
+    #     t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
+    #     model_kwargs = dict(y=y)
+    #     loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)
+    #     loss = loss_dict["loss"].mean()
+    #     self.log("val_loss", loss)
+
+    def backward(self, loss, optimizer, optimizer_idx, *args, **kwargs):
+        # update_ema(self.ema, self.module)
+        loss.backward()
