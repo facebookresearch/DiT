@@ -26,7 +26,7 @@ from copy import deepcopy
 from glob import glob
 from time import time
 
-from models import DiT_models
+from modules.dit_builder import DiT_models
 from modules.diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 

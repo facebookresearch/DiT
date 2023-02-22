@@ -11,12 +11,12 @@ import argparse
 import gradio as gr
 import torchvision
 
-from torchvision.utils import save_image, make_grid
+from torchvision.utils import make_grid
 from diffusers.models import AutoencoderKL
 
 from modules.diffusion import create_diffusion
 from download import find_model
-from models import DiT_models
+from modules.dit_builder import DiT_models
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True

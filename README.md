@@ -21,7 +21,7 @@ achieving a state-of-the-art FID of 2.27 on the latter.
 
 This repository contains:
 
-* 🪐 A simple PyTorch [implementation](models.py) of DiT
+* 🪐 A simple PyTorch [implementation](modules/dit_builder.py) of DiT
 * ⚡️ Pre-trained class-conditional DiT models trained on ImageNet (512x512 and 256x256)
 * 💥 A self-contained [Hugging Face Space](https://huggingface.co/spaces/wpeebles/DiT)
   and [Colab notebook](http://colab.research.google.com/github/facebookresearch/DiT/blob/main/run_DiT.ipynb) for running
@@ -59,11 +59,14 @@ automatically downloaded depending on the model you use. The script has various 
 and 512x512 models, adjust sampling steps, change the classifier-free guidance scale, etc. For example, to sample from
 our 512x512 DiT-XL/2 model, you can use:
 
-```python
-python
-sample.py - -image - size
-512 - -seed
-1
+```bash
+python sample.py --image-size 512 --seed 1
+```
+
+**New gradio interface!**
+
+```bash
+python sample_gradio.py
 ```
 
 For convenience, our pre-trained DiT models can be downloaded directly here as well:
@@ -78,11 +81,8 @@ you can add the `--ckpt`
 argument to use your own checkpoint instead. For example, to sample from the EMA weights of a custom
 256x256 DiT-L/4 model, run:
 
-```python
-python
-sample.py - -model
-DiT - L / 4 - -image - size
-256 - -ckpt / path / to / model.pt
+```bash
+python sample.py --model DiT-L/4 --image-size 256 --ckpt/path/to/model.pt
 ```
 
 ## Training DiT
@@ -92,10 +92,8 @@ DiT models, but it can be easily modified to support other types of conditioning
 with `N` GPUs on
 one node:
 
-```python
-torchrun - -nnodes = 1 - -nproc_per_node = N
-train.py - -model
-DiT - XL / 2 - -data - path / path / to / imagenet / train
+```bash
+torchrun --nnodes=1 --nproc_per_node = N train.py --model DiT-XL/2 --data -path/path/to/imagenet/train
 ```
 
 ### PyTorch Training Results
