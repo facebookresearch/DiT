@@ -43,7 +43,7 @@ def train_pl(args):
     model.train().to(device)
     # ema.eval()
 
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("high")
     trainer = pl.Trainer(
         auto_lr_find=True,
         enable_checkpointing=True,
@@ -52,7 +52,8 @@ def train_pl(args):
         accelerator='gpu',
         devices=1,
         max_epochs=args.epochs,
-        precision=16
+        precision=16,
+        move_metrics_to_cpu=True
     )
     trainer.fit(model, loader_train)
 
@@ -61,7 +62,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT_Clipped")
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
+    parser.add_argument("--image-size", type=int, choices=[128, 256, 512], default=256)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--global-batch-size", type=int, default=2)
     parser.add_argument("--global-seed", type=int, default=0)
