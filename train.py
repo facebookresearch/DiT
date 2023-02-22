@@ -6,19 +6,6 @@
 
 """
 A minimal training script for DiT using PyTorch DDP.
-
-Note: this script has NOT been thoroughly tested yet; there might be bugs!
-
-Training could likely be sped-up significantly by:
-    - using Flash Attention in the DiT model
-    - using torch.compile in PyTorch 2.0
-
-Basic features that would be nice to add:
-    - Monitor FID and other metrics
-    - Generate and save samples from the EMA model periodically
-    - Log data to W&B
-    - Resume training from a checkpoint
-    - AMP/bfloat16 support
 """
 import torch
 import torch.distributed as dist
@@ -116,6 +103,7 @@ def center_crop_arr(pil_image, image_size):
 #################################################################################
 #                                  Training Loop                                #
 #################################################################################
+
 def main(args):
     """
     Trains a new DiT model.
@@ -129,6 +117,7 @@ def main(args):
     device = rank % torch.cuda.device_count()
     seed = args.global_seed * dist.get_world_size() + rank
     torch.manual_seed(seed)
+    torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
 
     # Setup an experiment folder:
@@ -259,7 +248,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    # Default args here should train DiT-XL/2 with the same hyperparameters as in our paper (except training iters).
+    # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, default="results")

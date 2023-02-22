@@ -85,10 +85,23 @@ one node:
 torchrun --nnodes=1 --nproc_per_node=N train.py --model DiT-XL/2 --data-path /path/to/imagenet/train
 ```
 
-> **Note**<br>
-> This script is a PyTorch reimplementation of DiT training. It has been only partially tested. We have trained DiT-XL/2 (256x256) from scratch for 90K iterations; the loss curve closely matches the JAX implementation's and FID is very similar at 50K iterations. If you encounter any bugs, please open an issue!
+### PyTorch Training Results
 
-Training could likely be sped-up significantly by:
+We've trained DiT-XL/2 and DiT-B/4 models from scratch with the PyTorch training script
+to verify that it reproduces the original JAX results up to several hundred thousand training iterations. Across our experiments, the PyTorch-trained models give 
+similar (and sometimes slightly better) results compared to the JAX-trained models up to reasonable random variation. Some data points:
+
+| DiT Model  | Train Steps | FID-50K<br> (JAX Training) | FID-50K<br> (PyTorch Training) | PyTorch Global Training Seed |
+|------------|-------------|----------------------------|--------------------------------|------------------------------|
+| XL/2       | 400K        | 19.5                       | **18.1**                       | 42                           |
+| B/4        | 400K        | **68.4**                   | 68.9                           | 42                           |
+| B/4        | 400K        | 68.4                       | **68.3**                       | 100                          |
+
+These models were trained at 256x256 resolution; we used 8x A100s to train XL/2 and 4x A100s to train B/4. Note that FID 
+here is computed with 250 DDPM sampling steps, with the `mse` VAE decoder and without guidance (`cfg-scale=1`). 
+
+### Enhancements
+Training (and sampling) could likely be sped-up significantly by:
 - [ ] using [Flash Attention](https://github.com/HazyResearch/flash-attention) in the DiT model
 - [ ] using `torch.compile` in PyTorch 2.0
 
