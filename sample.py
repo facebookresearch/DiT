@@ -9,14 +9,15 @@ Sample new images from a pre-trained DiT.
 import torch
 import argparse
 
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
 from torchvision.utils import save_image
 from diffusers.models import AutoencoderKL
 
-from diffusion import create_diffusion
+from modules.diffusion import create_diffusion
 from download import find_model
 from models import DiT_models
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 
 def sample(args):
