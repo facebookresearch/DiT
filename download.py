@@ -11,7 +11,6 @@ from torchvision.datasets.utils import download_url
 import torch
 import os
 
-
 pretrained_models = {'DiT-XL-2-512x512.pt', 'DiT-XL-2-256x256.pt'}
 
 

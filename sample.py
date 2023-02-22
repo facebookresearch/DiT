@@ -7,17 +7,19 @@
 Sample new images from a pre-trained DiT.
 """
 import torch
+import argparse
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 from torchvision.utils import save_image
-from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
+
+from diffusion import create_diffusion
 from download import find_model
 from models import DiT_models
-import argparse
 
 
-def main(args):
+def sample(args):
     # Setup PyTorch:
     torch.manual_seed(args.seed)
     torch.set_grad_enabled(False)
@@ -42,8 +44,8 @@ def main(args):
     diffusion = create_diffusion(str(args.num_sampling_steps))
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
 
-    # Labels to condition the model with (feel free to change):
-    class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
+    # Labels to condition the model with (balloon, banjo, electric guitar, velvet)
+    class_labels = [417, 420, 546, 885]
 
     # Create sampling noise:
     n = len(class_labels)
@@ -79,4 +81,4 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     args = parser.parse_args()
-    main(args)
+    sample(args)
