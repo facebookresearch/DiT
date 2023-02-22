@@ -17,7 +17,7 @@ from timm.models.vision_transformer import PatchEmbed
 
 from modules.utils import TimestepEmbedder, LabelEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed
 
-from dit_clipped import DiT_Clipped
+from .dit_clipped import DiT_Clipped
 
 
 class DiT(nn.Module):
@@ -116,6 +116,10 @@ class DiT(nn.Module):
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (N,) tensor of diffusion timesteps
         y: (N,) tensor of class labels
+
+        typical values:
+        D: 1152 (576 * 2)
+        N: 8 (4 * 2)
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)  # (N, D)
@@ -198,10 +202,14 @@ def DiT_S_8(**kwargs):
     return DiT(depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
 
 
+def DiT_clipper_builder(**kwargs):
+    return DiT_Clipped(depth=28, hidden_size=768, patch_size=2, num_heads=16, **kwargs)
+
+
 DiT_models = {
     'DiT-XL/2': DiT_XL_2, 'DiT-XL/4': DiT_XL_4, 'DiT-XL/8': DiT_XL_8,
     'DiT-L/2': DiT_L_2, 'DiT-L/4': DiT_L_4, 'DiT-L/8': DiT_L_8,
     'DiT-B/2': DiT_B_2, 'DiT-B/4': DiT_B_4, 'DiT-B/8': DiT_B_8,
     'DiT-S/2': DiT_S_2, 'DiT-S/4': DiT_S_4, 'DiT-S/8': DiT_S_8,
-    'DiT_Clipped': DiT_Clipped
+    'DiT_Clipped': DiT_clipper_builder
 }

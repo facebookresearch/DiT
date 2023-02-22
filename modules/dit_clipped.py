@@ -4,6 +4,7 @@ import torch.nn as nn
 
 from timm.models.vision_transformer import PatchEmbed
 
+from modules.encoders.modules import FrozenCLIPTextEmbedder
 from modules.utils import TimestepEmbedder, LabelEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed
 
 
@@ -24,6 +25,7 @@ class DiT_Clipped(nn.Module):
             class_dropout_prob=0.1,
             num_classes=1000,
             learn_sigma=True,
+            clip_version='ViT-L/14'
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -43,7 +45,14 @@ class DiT_Clipped(nn.Module):
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
+
+        self.encoder = FrozenCLIPTextEmbedder(clip_version)
+
         self.initialize_weights()
+
+    def encode(self, text_prompt):
+        c = self.encoder.encode(text_prompt)
+        return c
 
     def initialize_weights(self):
         # Initialize transformer layers:
@@ -103,10 +112,14 @@ class DiT_Clipped(nn.Module):
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (N,) tensor of diffusion timesteps
         y: (N,) tensor of class labels
+
+        typical values:
+        D: 1152 (576 * 2)
+        N: 8 (4 * 2)
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)  # (N, D)
-        y = self.y_embedder(y, self.training)  # (N, D)
+        # y = self.y_embedder(y, self.training)  # (N, D)
         c = t + y  # (N, D)
         for block in self.blocks:
             x = block(x, c)  # (N, T, D)

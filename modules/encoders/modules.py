@@ -6,7 +6,7 @@ from einops import rearrange, repeat
 from transformers import CLIPTokenizer, CLIPTextModel
 import kornia
 
-from x_transformer import Encoder, TransformerWrapper
+from .x_transformer import Encoder, TransformerWrapper
 
 
 class AbstractEncoder(nn.Module):
@@ -234,7 +234,5 @@ class FrozenClipImageEmbedder(nn.Module):
 
 
 if __name__ == "__main__":
-    from ldm.util import count_params
-
     model = FrozenCLIPEmbedder()
-    count_params(model, verbose=True)
+    print(model)
