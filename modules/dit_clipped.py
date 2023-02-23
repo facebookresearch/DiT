@@ -150,7 +150,7 @@ class DiT_Clipped(pl.LightningModule):
             x = self.vae.encode(img.to(self.device)).latent_dist.sample().mul_(0.18215)
         t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
 
-        y = self.encode(text).squeeze(1).to(self.device)
+        y = self.encode(text).squeeze(1)
 
         model_kwargs = dict(y=y)
         loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)
@@ -169,5 +169,7 @@ class DiT_Clipped(pl.LightningModule):
     #     self.log("val_loss", loss)
 
     def backward(self, loss, optimizer, optimizer_idx, *args, **kwargs):
-        # update_ema(self.ema, self.module)
         loss.backward()
+
+    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
+        optimizer.zero_grad(set_to_none=True)

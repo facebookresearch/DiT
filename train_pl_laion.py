@@ -21,14 +21,11 @@ def train_pl(args):
     model = DiT_models[args.model](
         input_size=latent_size,
     )
-    # ema = deepcopy(model).cpu()
-    # requires_grad(ema, False)
 
     diffusion = create_diffusion(timestep_respacing="")
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     # training only
     model.diffusion = diffusion
-    # model.ema = ema
     model.vae = vae
 
     loader_train = DataLoader(
@@ -52,8 +49,7 @@ def train_pl(args):
         accelerator='gpu',
         devices=1,
         max_epochs=args.epochs,
-        precision=16,
-        move_metrics_to_cpu=True
+        precision=16 if args.precision == "fp16" else 32,
     )
     trainer.fit(model, loader_train)
 
@@ -64,9 +60,10 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT_Clipped")
     parser.add_argument("--image-size", type=int, choices=[128, 256, 512], default=256)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--global-batch-size", type=int, default=2)
+    parser.add_argument("--global-batch-size", type=int, default=4)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--precision", type=str, choices=["fp16", "fp32"], default="fp16")
     parsed_args = parser.parse_args()
     train_pl(parsed_args)

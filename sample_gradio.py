@@ -22,7 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-def sample(prompt, class_idx, cfg_scale, num_sampling_steps):
+def sample(prompt, cfg_scale, num_sampling_steps):
     # Setup PyTorch:
     torch.manual_seed(args.seed)
     torch.set_grad_enabled(False)
@@ -31,17 +31,13 @@ def sample(prompt, class_idx, cfg_scale, num_sampling_steps):
     model.eval()
     diffusion = create_diffusion(str(num_sampling_steps))
 
-    # Labels to condition the model with (balloon, banjo, electric guitar, velvet)
-    class_labels = [class_idx] * 4
-
-    # Create sampling noise:
-    n = len(class_labels)
-    z = torch.randn(n, 4, latent_size, latent_size, device=device)
-    y = model.encode(prompt)[0].repeat((4, 1)).to(device)
+    bsize = 1
+    z = torch.randn(bsize, 4, latent_size, latent_size, device=device)
+    y = model.encode(prompt).squeeze(1).to(device)
 
     # Setup classifier-free guidance:
     z = torch.cat([z, z], 0)
-    y_null = model.encode("")[0].repeat((4, 1)).to(device)  # negative
+    y_null = model.encode("").squeeze(1).to(device)  # negative
     y = torch.cat([y, y_null], 0)
     model_kwargs = dict(y=y, cfg_scale=cfg_scale)
 
@@ -71,7 +67,6 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT_Clipped")
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="mse")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
@@ -83,7 +78,6 @@ if __name__ == "__main__":
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
-        num_classes=args.num_classes
     ).to(device)
     if args.ckpt:
         ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
@@ -96,7 +90,6 @@ if __name__ == "__main__":
         fn=sample,
         inputs=[
             gr.Text(label="Text Prompt"),
-            gr.Slider(minimum=1, maximum=1000, value=417, step=1, label="Imagenet class index"),
             gr.Slider(minimum=1, maximum=20, value=4, step=0.1, label="Cfg scale"),
             gr.Slider(minimum=5, maximum=500, value=50, step=1, label="Sampling steps")
         ],
