@@ -45,10 +45,14 @@ def default(val, d):
     return d() if isfunction(d) else d
 
 
-def process_input(data_dict):
-    text, imgs = data_dict["TEXT"], data_dict["URL"]
+def process_input_diff(data_dict):
+    texts, imgs = data_dict["prompt"], data_dict["image"]
+    return texts, torch.stack([transform(img.convert('RGB')) for img in imgs])
+
+
+def process_input_laion(data_dict):
+    texts, imgs = data_dict["TEXT"], data_dict["URL"]
     for i, img in enumerate(imgs):
-        r = None
         for _ in range(3):  # 3 tryouts
             try:
                 r = requests.get(img).content
@@ -63,9 +67,9 @@ def process_input(data_dict):
         except Exception as e:
             print(e, img)
             imgs[i] = Image.open("forest.jpg").convert('RGB')
-            text[i] = "forest"
+            texts[i] = "forest"
     imgs = [transform(img) for img in imgs]
-    return text, torch.stack(imgs)
+    return texts, torch.stack(imgs)
 
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):

@@ -198,6 +198,12 @@ class FrozenCLIPTextEmbedder(nn.Module):
         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
         return z
 
+    def to(self, device, dtype=None, non_blocking=None):
+        super(FrozenCLIPTextEmbedder, self).to(device)
+        self.model.to(device)
+        self.device = device
+
+
 
 if __name__ == "__main__":
     model = FrozenCLIPEmbedder()

@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from timm.models.vision_transformer import PatchEmbed
 
 from modules.encoders.modules import FrozenCLIPTextEmbedder
-from modules.utils import TimestepEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed, process_input
+from modules.utils import TimestepEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed, process_input_laion
 
 
 class DiT_Clipped(pl.LightningModule):
@@ -25,7 +25,7 @@ class DiT_Clipped(pl.LightningModule):
             mlp_ratio=4.0,
             class_dropout_prob=0.1,
             learn_sigma=True,
-            clip_version='ViT-L/14'
+            clip_version='ViT-B-32-quickgelu'
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -51,7 +51,6 @@ class DiT_Clipped(pl.LightningModule):
 
     @torch.no_grad()
     def encode(self, text_prompt):
-        self.encoder.cpu()
         c = self.encoder.encode(text_prompt)
         return c.to(self.device)
 
@@ -147,13 +146,18 @@ class DiT_Clipped(pl.LightningModule):
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
-        text, img = process_input(train_batch)
+        # text, img = process_input_laion(train_batch)
+        y, img = torch.stack(train_batch["y"][0]).permute(1, 0), \
+                 torch.stack([torch.stack([torch.stack(y) for y in x]) for x in train_batch["img"]]).permute(3, 0, 1, 2)
+
+        y, img = y.to(self.device).to(self.dtype), img.cpu().to(torch.float32)
+
         with torch.no_grad():
             self.vae.cpu().to(torch.float32)
-            x = self.vae.encode(img).latent_dist.sample().mul_(0.18215).to(self.device)
+            x = self.vae.encode(img).latent_dist.sample().mul_(0.18215).to(self.device).to(self.dtype)
         t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
 
-        y = self.encode(text).squeeze(1)
+        # y = self.encode(text).squeeze(1)
 
         model_kwargs = dict(y=y)
         loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)

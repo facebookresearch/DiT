@@ -203,7 +203,7 @@ def DiT_S_8(**kwargs):
 
 
 def DiT_clipper_builder(**kwargs):
-    return DiT_Clipped(depth=28, hidden_size=768, patch_size=2, num_heads=16, **kwargs)
+    return DiT_Clipped(depth=28, hidden_size=512, patch_size=2, num_heads=16, **kwargs)
 
 
 DiT_models = {
