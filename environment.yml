@@ -12,3 +12,4 @@ dependencies:
       - diffusers
       - accelerate
       - gradio
+      - open_clip_torch

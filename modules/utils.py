@@ -1,3 +1,4 @@
+import time
 from io import BytesIO
 
 import torch
@@ -46,7 +47,23 @@ def default(val, d):
 
 def process_input(data_dict):
     text, imgs = data_dict["TEXT"], data_dict["URL"]
-    imgs = [Image.open(BytesIO(requests.get(img).content)) for img in imgs]
+    for i, img in enumerate(imgs):
+        r = None
+        for _ in range(3):  # 3 tryouts
+            try:
+                r = requests.get(img).content
+                break
+            except Exception as e:
+                print(e, img)
+                time.sleep(0.5)
+
+        r = BytesIO(r)
+        try:
+            imgs[i] = Image.open(r)
+        except Exception as e:
+            print(e, img)
+            imgs[i] = Image.open("forest.jpg").convert('RGB')
+            text[i] = "forest"
     imgs = [transform(img) for img in imgs]
     return text, torch.stack(imgs)
 
@@ -240,7 +257,7 @@ class DiTBlock(nn.Module):
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
         self.mlp = MLP(dim_model=hidden_size, hidden_layer_multiplier=int(mlp_ratio),
-                        activation=Activation("gelu"), dropout=0) if XFORMERS_AVAILABLE else \
+                       activation=Activation("gelu"), dropout=0) if XFORMERS_AVAILABLE else \
             Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
 
         self.adaLN_modulation = nn.Sequential(

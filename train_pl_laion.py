@@ -23,7 +23,7 @@ def train_pl(args):
     )
 
     diffusion = create_diffusion(timestep_respacing="")
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").cpu()
     # training only
     model.diffusion = diffusion
     model.vae = vae
@@ -31,10 +31,10 @@ def train_pl(args):
     loader_train = DataLoader(
         laion_dataset,
         batch_size=args.global_batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=True
+        drop_last=True,
     )
     # update_ema(ema, model.module, decay=0)
     model.train().to(device)
@@ -51,6 +51,7 @@ def train_pl(args):
         max_epochs=args.epochs,
         precision=16 if args.precision == "fp16" else 32,
     )
+
     trainer.fit(model, loader_train)
 
 

@@ -49,9 +49,11 @@ class DiT_Clipped(pl.LightningModule):
 
         self.initialize_weights()
 
+    @torch.no_grad()
     def encode(self, text_prompt):
+        self.encoder.cpu()
         c = self.encoder.encode(text_prompt)
-        return c
+        return c.to(self.device)
 
     def initialize_weights(self):
         # Initialize transformer layers:
@@ -147,7 +149,8 @@ class DiT_Clipped(pl.LightningModule):
     def training_step(self, train_batch, batch_idx):
         text, img = process_input(train_batch)
         with torch.no_grad():
-            x = self.vae.encode(img.to(self.device)).latent_dist.sample().mul_(0.18215)
+            self.vae.cpu().to(torch.float32)
+            x = self.vae.encode(img).latent_dist.sample().mul_(0.18215).to(self.device)
         t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
 
         y = self.encode(text).squeeze(1)
