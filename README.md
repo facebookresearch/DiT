@@ -54,7 +54,7 @@ automatically downloaded depending on the model you use. The script has various 
 and 512x512 models, adjust sampling steps, change the classifier-free guidance scale, etc. For example, to sample from
 our 512x512 DiT-XL/2 model, you can use:
 
-```python
+```bash
 python sample.py --image-size 512 --seed 1
 ```
 
@@ -70,7 +70,7 @@ For convenience, our pre-trained DiT models can be downloaded directly here as w
 argument to use your own checkpoint instead. For example, to sample from the EMA weights of a custom 
 256x256 DiT-L/4 model, run:
 
-```python
+```bash
 python sample.py --model DiT-L/4 --image-size 256 --ckpt /path/to/model.pt
 ```
 
@@ -81,7 +81,7 @@ We provide a training script for DiT in [`train.py`](train.py). This script can 
 DiT models, but it can be easily modified to support other types of conditioning. To launch DiT-XL/2 (256x256) training with `N` GPUs on 
 one node:
 
-```python
+```bash
 torchrun --nnodes=1 --nproc_per_node=N train.py --model DiT-XL/2 --data-path /path/to/imagenet/train
 ```
 
@@ -115,6 +115,20 @@ Basic features that would be nice to add:
 - [ ] Generate and save samples from the EMA model periodically
 - [ ] Resume training from a checkpoint
 - [ ] AMP/bfloat16 support
+
+
+## Evaluation (FID, Inception Score, etc.)
+
+We include a [`sample_ddp.py`](sample_ddp.py) script which samples a large number of images from a DiT model in parallel. This script 
+generates a folder of samples as well as a `.npz` file which can be directly used with [ADM's TensorFlow
+evaluation suite](https://github.com/openai/guided-diffusion/tree/main/evaluations) to compute FID, Inception Score and
+other metrics. For example, to sample 50K images from our pre-trained DiT-XL/2 model over `N` GPUs, run:
+
+```bash
+torchrun --nnodes=1 --nproc_per_node=N sample_ddp.py --model DiT-XL/2 --num-fid-samples 50000
+```
+
+There are several additional options; see [`sample_ddp.py`](sample_ddp.py) for details. 
 
 
 ## Differences from JAX
