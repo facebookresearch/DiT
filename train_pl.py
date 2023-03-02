@@ -1,23 +1,18 @@
 import argparse
-import os.path
 
 import pytorch_lightning as pl
-import torch
+import torchvision
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 from torch.utils.data import DataLoader
-from datasets import load_dataset, load_from_disk
 from torchvision.transforms import transforms
 
 from modules.dit_builder import DiT_models
 from modules.diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
+
+from modules.image_cap_dataset import ImageCaptionDataset
 from modules.training_utils import *
-
-
-def m(x):
-    img = transform(x["image"].convert('RGB')).cpu()
-    t = model.encode(x["prompt"]).squeeze(1).cpu()
-    return {"y": t, "img": img}
 
 
 def train_pl(args):
@@ -29,24 +24,17 @@ def train_pl(args):
     model = DiT_models[args.model](
         input_size=latent_size,
     )
-    if not os.path.exists("pl_dataset"):
-        dataset = load_dataset("poloclub/diffusiondb", name="2m_first_5k")["train"]
-        model.encoder.to(device)
-        dataset = dataset.map(m, remove_columns=['image', 'prompt', 'seed', 'step', 'cfg', 'sampler', 'width', 'height',
-                                                 'user_name', 'timestamp', 'image_nsfw', 'prompt_nsfw'], batch_size=100,
-                              drop_last_batch=True)
-        dataset.save_to_disk("pl_dataset")
-        exit()
-    else:
-        dataset = load_from_disk("pl_dataset")  # already preloaded
+    dataset = ImageCaptionDataset(args.hf_dataset_name, args.token, res=args.image_size)
 
-    del model.encoder
+    # del model.encoder
 
     diffusion = create_diffusion(timestep_respacing="")
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").cpu()
     # training only
     model.diffusion = diffusion
     model.vae = vae
+    model_ckpt = ModelCheckpoint(dirpath="ckpts/", monitor=None, save_top_k=-1, save_last=True, every_n_train_steps=1000
+                                 )
 
     loader_train = DataLoader(
         dataset,
@@ -70,6 +58,7 @@ def train_pl(args):
         devices=1,
         max_epochs=args.epochs,
         precision=16 if args.precision == "fp16" else 32,
+        callbacks=[model_ckpt]
     )
 
     trainer.fit(model, loader_train)
@@ -77,6 +66,10 @@ def train_pl(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
+    parser.add_argument("--hf_dataset_name", type=str, default="facebook/winoground")
+    parser.add_argument("--token", type=str)
+
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT_Clipped")
     parser.add_argument("--image-size", type=int, choices=[128, 256, 512], default=256)

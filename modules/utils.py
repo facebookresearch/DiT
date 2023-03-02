@@ -1,15 +1,16 @@
+import math
 import time
+from inspect import isfunction
 from io import BytesIO
 
-import torch
-import math
-import requests
-
-import torch.nn as nn
 import numpy as np
+import requests
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
-from inspect import isfunction
-from timm.models.vision_transformer import Attention
+from einops import rearrange, repeat
+from torch import einsum
 
 try:
     import xformers
@@ -23,16 +24,17 @@ except Exception as e:
     XFORMERS_AVAILABLE = False
     from timm.models.vision_transformer import Mlp
 
-from torchvision.transforms import transforms
 
-from modules.training_utils import center_crop_arr
-
-transform = transforms.Compose([
-    transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, 256)),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
-])
+# transform = transforms.Compose([
+#     transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, 256)),
+#     transforms.RandomHorizontalFlip(),
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+# ])
+# def m(x):
+#     img = transform(x["image"].convert('RGB')).cpu()
+#     t = model.encode(x["prompt"]).squeeze(1).cpu()
+#     return {"y": t, "img": img}
 
 
 def exists(val):
@@ -202,7 +204,7 @@ class LabelEmbedder(nn.Module):
 
 
 class MemoryEfficientCrossAttention(nn.Module):
-    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0, qkv_bias=False):
         super().__init__()
         inner_dim = dim_head * heads
         context_dim = default(context_dim, query_dim)
@@ -210,9 +212,9 @@ class MemoryEfficientCrossAttention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
 
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
-        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=qkv_bias)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=qkv_bias)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=qkv_bias)
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op = None
@@ -245,19 +247,203 @@ class MemoryEfficientCrossAttention(nn.Module):
         return self.to_out(out)
 
 
+class CrossAttention(nn.Module):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0., qkv_bias=False):
+        super().__init__()
+        self.dim_head = 40
+        inner_dim = dim_head * heads
+        context_dim = default(context_dim, query_dim)
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=qkv_bias)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=qkv_bias)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=qkv_bias)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, query_dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x, context=None, mask=None):
+        try:
+            return self.fast_forward(x, context, mask)
+        except:
+            return self.slow_forward(x, context, mask)
+
+    def fast_forward(self, x, context=None, mask=None, dtype=None):
+        # return self.light_forward(x, context=context, mask=mask, dtype=dtype)
+        h = self.heads
+        q = self.to_q(x)
+        context = default(context, x)
+        k = self.to_k(context)
+        v = self.to_v(context)
+        del context, x
+
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
+
+        sim = einsum('b i d, b j d -> b i j', q, k)  # (8, 4096, 40)
+        sim *= self.scale
+        del q, k
+
+        if exists(mask):
+            mask = rearrange(mask, 'b ... -> b (...)')
+            max_neg_value = -torch.finfo(sim.dtype).max
+            mask = repeat(mask, 'b j -> (b h) () j', h=h)
+            sim.masked_fill_(~mask, max_neg_value)
+            del mask
+
+        sim[sim.shape[0] // 2:] = sim[sim.shape[0] // 2:].softmax(dim=-1)
+        sim[:sim.shape[0] // 2] = sim[:sim.shape[0] // 2].softmax(dim=-1)
+
+        sim = einsum('b i j, b j d -> b i d', sim, v)
+        sim = rearrange(sim, '(b h) n d -> b n (h d)', h=h)
+        del h, v
+
+        return self.to_out(sim)
+
+    def slow_forward(self, x, context=None, mask=None):
+        h = self.heads
+        device = x.device
+        dtype = x.dtype
+        q_proj = self.to_q(x)
+        context = default(context, x)
+        k_proj = self.to_k(context)
+        v_proj = self.to_v(context)
+
+        del context, x
+        try:
+            stats = torch.cuda.memory_stats(device)
+            mem_active = stats['active_bytes.all.current']
+            mem_reserved = stats['reserved_bytes.all.current']
+            mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
+            mem_free_torch = mem_reserved - mem_active
+            mem_free_total = mem_free_cuda + mem_free_torch
+
+            # mem counted before q k v are generated because they're gonna be stored on cpu
+            allocatable_mem = int(mem_free_total // 2) + 1 if dtype == torch.float16 else \
+                int(mem_free_total // 4) + 1
+            required_mem = int(
+                q_proj.shape[0] * q_proj.shape[1] * q_proj.shape[2] * 4 * 2 * 50) if dtype == torch.float16 \
+                else int(q_proj.shape[0] * q_proj.shape[1] * q_proj.shape[2] * 8 * 2 * 50)  # the last 50 is for speed
+            chunk_split = (required_mem // allocatable_mem) * 2 if required_mem > allocatable_mem else 1
+        except Exception as e:
+            chunk_split = 1
+            # print(e)
+
+        # print(f"allocatable_mem: {allocatable_mem}, required_mem: {required_mem}, chunk_split: {chunk_split}")
+        # print(q.shape) torch.Size([1, 4096, 320])
+
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_proj, k_proj, v_proj))
+        del q_proj, k_proj, v_proj
+        torch.cuda.empty_cache()
+
+        r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=torch.device("cpu"))
+        mp = q.shape[1] // chunk_split
+        for i in range(0, q.shape[1], mp):
+            q, k = q.to(device), k.to(device)
+            s1 = einsum('b i d, b j d -> b i j', q[:, i:i + mp], k)
+            q, k = q.cpu(), k.cpu()
+            s1 *= self.scale
+            s2 = F.softmax(s1, dim=-1)
+            del s1
+            r1[:, i:i + mp] = einsum('b i j, b j d -> b i d', s2, v).cpu()
+            del s2
+        r2 = rearrange(r1.to(device), '(b h) n d -> b n (h d)', h=h).to(device)
+        del r1, q, k, v
+
+        return self.to_out(r2)
+
+
+class GEGLU(nn.Module):
+    def __init__(self, dim_in, dim_out):
+        super().__init__()
+        self.proj = nn.Linear(dim_in, dim_out * 2)
+
+    def forward(self, x):
+        x, gate = self.proj(x).chunk(2, dim=-1)
+        return x * F.gelu(gate)
+
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, dim_out=None, mult=4, glu=False, dropout=0.):
+        super().__init__()
+        inner_dim = int(dim * mult)
+        dim_out = default(dim_out, dim)
+        project_in = nn.Sequential(
+            nn.Linear(dim, inner_dim),
+            nn.GELU()
+        ) if not glu else GEGLU(dim, inner_dim)
+
+        self.net = nn.Sequential(
+            project_in,
+            nn.Dropout(dropout),
+            nn.Linear(inner_dim, dim_out)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class BasicTransformerBlock(nn.Module):
+    r"""
+    A basic Transformer block.
+    Parameters:
+        dim (:obj:`int`): The number of channels in the input and output.
+        n_heads (:obj:`int`): The number of heads to use for multi-head attention.
+        d_head (:obj:`int`): The number of channels in each head.
+        dropout (:obj:`float`, *optional*, defaults to 0.0): The dropout probability to use.
+        context_dim (:obj:`int`, *optional*): The size of the context vector for cross attention.
+        gated_ff (:obj:`bool`, *optional*, defaults to :obj:`False`): Whether to use a gated feed-forward network.
+        checkpoint (:obj:`bool`, *optional*, defaults to :obj:`False`): Whether to use checkpointing.
+    """
+
+    def __init__(
+            self,
+            dim: int,
+            n_heads: int,
+            d_head: int = 64,
+            dropout=0.0,
+            context_dim=None,
+            gated_ff: bool = True,
+            checkpoint: bool = True,
+            qkv_bias=False
+    ):
+        super().__init__()
+        AttentionBuilder = MemoryEfficientCrossAttention if XFORMERS_AVAILABLE else CrossAttention
+        self.attn1 = AttentionBuilder(
+            query_dim=dim, heads=n_heads, dim_head=d_head, dropout=dropout, qkv_bias=qkv_bias)  # is a self-attention
+        self.ff = FeedForward(dim, dropout=dropout, glu=gated_ff)
+        self.attn2 = AttentionBuilder(
+            query_dim=dim, context_dim=context_dim, heads=n_heads, dim_head=d_head, dropout=dropout, qkv_bias=False)
+        self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self.norm3 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self.checkpoint = checkpoint
+
+    def _set_attention_slice(self, slice_size):
+        self.attn1._slice_size = slice_size
+        self.attn2._slice_size = slice_size
+
+    def forward(self, hidden_states, context=None):
+        hidden_states = hidden_states.contiguous() if hidden_states.device.type == "mps" else hidden_states
+        hidden_states = self.attn1(self.norm1(hidden_states)) + hidden_states
+        hidden_states = self.attn2(self.norm2(hidden_states), context=context) + hidden_states
+        hidden_states = self.ff(self.norm3(hidden_states)) + hidden_states
+        return hidden_states
+
+
 class DiTBlock(nn.Module):
     """
     A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
 
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, context_dim=None, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
-        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
-        self.attn = MemoryEfficientCrossAttention(hidden_size, heads=num_heads) \
-            if XFORMERS_AVAILABLE else Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
+        self.attn = BasicTransformerBlock(dim=hidden_size, n_heads=num_heads, context_dim=context_dim, qkv_bias=True)
 
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
         self.mlp = MLP(dim_model=hidden_size, hidden_layer_multiplier=int(mlp_ratio),
@@ -269,10 +455,10 @@ class DiTBlock(nn.Module):
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c):
+    def forward(self, x, c, context=None):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(x, shift_msa, scale_msa), context=context)
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(x, shift_mlp, scale_mlp))
         return x
 
 
@@ -290,7 +476,7 @@ class FinalLayer(nn.Module):
             nn.Linear(hidden_size, 2 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c):
+    def forward(self, x, c, context=None):
         shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
         x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)

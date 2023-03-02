@@ -136,7 +136,7 @@ class SpatialRescaler(nn.Module):
         return self(x)
 
 
-class FrozenCLIPEmbedder(AbstractEncoder):
+class FrozenCLIPEmbedder(AbstractEncoder):  # h
     """Uses the CLIP transformer encoder for text (from Hugging Face)"""
 
     def __init__(self, version="openai/clip-vit-large-patch14", device="cpu", max_length=77):
@@ -163,6 +163,11 @@ class FrozenCLIPEmbedder(AbstractEncoder):
 
     def encode(self, text):
         return self(text)
+
+    def to(self, device, dtype=None, non_blocking=None):
+        super(FrozenCLIPEmbedder, self).to(device)
+        self.transformer.to(device)
+        self.device = device
 
 
 class FrozenCLIPTextEmbedder(nn.Module):
@@ -202,7 +207,6 @@ class FrozenCLIPTextEmbedder(nn.Module):
         super(FrozenCLIPTextEmbedder, self).to(device)
         self.model.to(device)
         self.device = device
-
 
 
 if __name__ == "__main__":

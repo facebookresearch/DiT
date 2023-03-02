@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 
 from timm.models.vision_transformer import PatchEmbed
 
-from modules.encoders.modules import FrozenCLIPTextEmbedder
+from modules.encoders.modules import FrozenCLIPEmbedder
 from modules.utils import TimestepEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed, process_input_laion
 
 
@@ -20,12 +20,13 @@ class DiT_Clipped(pl.LightningModule):
             patch_size=2,
             in_channels=4,
             hidden_size=1152,
+            context_dim=768,
             depth=28,
             num_heads=16,
             mlp_ratio=4.0,
             class_dropout_prob=0.1,
             learn_sigma=True,
-            clip_version='ViT-B-32-quickgelu'
+            clip_version='openai/clip-vit-large-patch14'
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -41,16 +42,18 @@ class DiT_Clipped(pl.LightningModule):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, context_dim=context_dim, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
 
-        self.encoder = FrozenCLIPTextEmbedder(clip_version)
+        self.encoder = FrozenCLIPEmbedder(clip_version)
 
         self.initialize_weights()
 
     @torch.no_grad()
-    def encode(self, text_prompt):
+    def encode(self, text_prompt, device=None):
+        device = device if device is not None else self.device
+        self.encoder.to(device)
         c = self.encoder.encode(text_prompt)
         return c.to(self.device)
 
@@ -103,23 +106,21 @@ class DiT_Clipped(pl.LightningModule):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
 
-    def forward(self, x, t, y):
+    def forward(self, x, t, context):
         """
         Forward pass of DiT.
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (N,) tensor of diffusion timesteps
-        y: (N,) tensor of class labels
-
-        typical values:
-        D: 1152 (576 * 2)
-        N: 8 (4 * 2)
+        context: (N, context_length, context_dim) embedding context
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)  # (N, D)
-        c = t + y  # (N, D)
         for block in self.blocks:
-            x = block(x, c)  # (N, T, D)
-        x = self.final_layer(x, c)  # (N, T, patch_size ** 2 * out_channels)
+            x = block(x, t, context)  # (N, T, D)
+
+        # left context in, but it's not used atm
+        x = self.final_layer(x, t, context)  # (N, T, patch_size ** 2 * out_channels)
+
         x = self.unpatchify(x)  # (N, out_channels, H, W)
         return x
 
@@ -146,20 +147,20 @@ class DiT_Clipped(pl.LightningModule):
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
-        # text, img = process_input_laion(train_batch)
-        y, img = torch.stack(train_batch["y"][0]).permute(1, 0), \
-                 torch.stack([torch.stack([torch.stack(y) for y in x]) for x in train_batch["img"]]).permute(3, 0, 1, 2)
-
-        y, img = y.to(self.device).to(self.dtype), img.cpu().to(torch.float32)
-
+        img, context = train_batch
         with torch.no_grad():
+            context = self.encode(context, device=torch.device("cpu"))
+            context, img = context.to(self.device).to(self.dtype), img.cpu().to(torch.float32)
             self.vae.cpu().to(torch.float32)
             x = self.vae.encode(img).latent_dist.sample().mul_(0.18215).to(self.device).to(self.dtype)
+
         t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
 
-        # y = self.encode(text).squeeze(1)
+        # I'm paranoid
+        context.requires_grad = True
+        x.requires_grad = True
 
-        model_kwargs = dict(y=y)
+        model_kwargs = dict(context=context)
         loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)
         loss = loss_dict["loss"].mean()
         self.log("train_loss", loss)
