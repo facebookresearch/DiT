@@ -96,8 +96,8 @@ if __name__ == "__main__":
         inputs=[
             gr.Text(label="Text Prompt", value="an apple"),
             gr.Slider(minimum=1, maximum=20, value=4, step=0.1, label="Cfg scale"),
-            gr.Slider(minimum=5, maximum=500, value=50, step=1, label="Sampling steps"),
-            gr.Slider(minimum=1, maximum=9223372036854775807, value=4, step=1,
+            gr.Slider(minimum=5, maximum=1000, value=50, step=1, label="Sampling steps"),
+            gr.Slider(minimum=1, maximum=9223372036854775807, value=5782510030869745000, step=1,
                       label="Seed"),
         ],
         outputs=[

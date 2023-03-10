@@ -1,3 +1,5 @@
+import random
+
 import torch
 
 import torch.nn as nn
@@ -47,6 +49,8 @@ class DiT_Clipped(pl.LightningModule):
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
 
         self.encoder = FrozenCLIPEmbedder(clip_version)
+
+        self.secondary_device = torch.device("cpu")
 
         self.initialize_weights()
 
@@ -143,15 +147,16 @@ class DiT_Clipped(pl.LightningModule):
         return torch.cat([eps, rest], dim=1)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=0)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=1e-5)
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
         img, context = train_batch
+
         with torch.no_grad():
-            context = self.encode(context, device=torch.device("cpu"))
-            context, img = context.to(self.device).to(self.dtype), img.cpu().to(torch.float32)
-            self.vae.cpu().to(torch.float32)
+            context = self.encode(context, device=self.secondary_device)
+            context, img = context.to(self.device).to(self.dtype), img.to(self.secondary_device).to(torch.float32)
+            self.vae.to(self.secondary_device).to(torch.float32)
             x = self.vae.encode(img).latent_dist.sample().mul_(0.18215).to(self.device).to(self.dtype)
 
         t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
@@ -162,8 +167,12 @@ class DiT_Clipped(pl.LightningModule):
 
         model_kwargs = dict(context=context)
         loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)
-        loss = loss_dict["loss"].mean()
+        loss = loss_dict["loss"].mean()  # vb mse loss
+
         self.log("train_loss", loss)
+        self.log("train_bv", loss_dict["vb"].mean())
+        self.log("train_mse", loss_dict["mse"].mean())
+
         return loss
 
     # def validation_step(self, val_batch, batch_idx):
