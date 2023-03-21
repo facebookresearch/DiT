@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from functools import partial
-import open_clip
+# import open_clip
 from einops import rearrange, repeat
 from transformers import CLIPTokenizer, CLIPTextModel
 import kornia
@@ -170,43 +170,43 @@ class FrozenCLIPEmbedder(AbstractEncoder):  # h
         self.device = device
 
 
-class FrozenCLIPTextEmbedder(nn.Module):
-    """
-    Uses the CLIP transformer encoder for text.
-    """
-
-    def __init__(self, version='ViT-B-32-quickgelu', device="cpu", max_length=77, n_repeat=1, normalize=True):
-        super().__init__()
-        self.model = open_clip.create_model(version, pretrained='laion400m_e32', jit=False, device="cpu")
-        self.tokenizer = open_clip.get_tokenizer('ViT-B-32-quickgelu')
-        self.device = device
-        self.max_length = max_length
-        self.n_repeat = n_repeat
-        self.normalize = normalize
-
-    def freeze(self):
-        self.model = self.model.eval()
-        for param in self.parameters():
-            param.requires_grad = False
-
-    def forward(self, text):
-        tokens = self.tokenizer(text).to(self.device)
-        z = self.model.encode_text(tokens)
-        if self.normalize:
-            z = z / torch.linalg.norm(z, dim=1, keepdim=True)
-        return z
-
-    def encode(self, text):
-        z = self(text)
-        if z.ndim == 2:
-            z = z[:, None, :]
-        z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
-        return z
-
-    def to(self, device, dtype=None, non_blocking=None):
-        super(FrozenCLIPTextEmbedder, self).to(device)
-        self.model.to(device)
-        self.device = device
+# class FrozenCLIPTextEmbedder(nn.Module):
+#     """
+#     Uses the CLIP transformer encoder for text.
+#     """
+#
+#     def __init__(self, version='ViT-B-32-quickgelu', device="cpu", max_length=77, n_repeat=1, normalize=True):
+#         super().__init__()
+#         self.model = open_clip.create_model(version, pretrained='laion400m_e32', jit=False, device="cpu")
+#         self.tokenizer = open_clip.get_tokenizer('ViT-B-32-quickgelu')
+#         self.device = device
+#         self.max_length = max_length
+#         self.n_repeat = n_repeat
+#         self.normalize = normalize
+#
+#     def freeze(self):
+#         self.model = self.model.eval()
+#         for param in self.parameters():
+#             param.requires_grad = False
+#
+#     def forward(self, text):
+#         tokens = self.tokenizer(text).to(self.device)
+#         z = self.model.encode_text(tokens)
+#         if self.normalize:
+#             z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+#         return z
+#
+#     def encode(self, text):
+#         z = self(text)
+#         if z.ndim == 2:
+#             z = z[:, None, :]
+#         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
+#         return z
+#
+#     def to(self, device, dtype=None, non_blocking=None):
+#         super(FrozenCLIPTextEmbedder, self).to(device)
+#         self.model.to(device)
+#         self.device = device
 
 
 if __name__ == "__main__":

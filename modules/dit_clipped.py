@@ -1,17 +1,18 @@
-import random
+import gc
 
 import torch
 
 import torch.nn as nn
-import pytorch_lightning as pl
+import lightning as L
 
 from timm.models.vision_transformer import PatchEmbed
+from tqdm import tqdm
 
 from modules.encoders.modules import FrozenCLIPEmbedder
 from modules.utils import TimestepEmbedder, DiTBlock, FinalLayer, get_2d_sincos_pos_embed, process_input_laion
 
 
-class DiT_Clipped(pl.LightningModule):
+class DiT_Clipped(L.LightningModule):
     """
     Diffusion model with a Transformer backbone and clip encoder.
     """
@@ -28,7 +29,8 @@ class DiT_Clipped(pl.LightningModule):
             mlp_ratio=4.0,
             class_dropout_prob=0.1,
             learn_sigma=True,
-            clip_version='openai/clip-vit-large-patch14'
+            clip_version='openai/clip-vit-large-patch14',
+            compile_components=False
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -43,21 +45,43 @@ class DiT_Clipped(pl.LightningModule):
         # Will use fixed sin-cos embedding:
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
-        self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, context_dim=context_dim, mlp_ratio=mlp_ratio) for _ in range(depth)
-        ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
 
         self.encoder = FrozenCLIPEmbedder(clip_version)
 
         self.secondary_device = torch.device("cpu")
 
+        self.blocks = [
+            DiTBlock(hidden_size, num_heads, context_dim=context_dim, mlp_ratio=mlp_ratio) for _ in range(depth)
+        ]
+
         self.initialize_weights()
+        if compile_components:
+            self.compile_components()
+        self.blocks = nn.ModuleList(self.blocks)
+
+    def compile_components(self):
+        bar = tqdm(total=5, desc="Compiling components..")
+        bar.update(0)
+        self.x_embedder = torch.compile(self.x_embedder)
+        bar.update(1)
+        self.t_embedder = torch.compile(self.t_embedder)
+        bar.update(2)
+        self.final_layer = torch.compile(self.final_layer)
+        bar.update(3)
+        self.encoder = torch.compile(self.encoder)
+        bar.update(4)
+        self.blocks = [torch.compile(x) for x in self.blocks]
+        bar.update(5)
+        bar.close()
+        print("Compiling completed.")
 
     @torch.no_grad()
     def encode(self, text_prompt, device=None):
         device = device if device is not None else self.device
-        self.encoder.to(device)
+        if self.encoder.device != device:
+            self.encoder.to(device)
+            self.encoder.device = device
         c = self.encoder.encode(text_prompt)
         return c.to(self.device)
 
@@ -124,6 +148,7 @@ class DiT_Clipped(pl.LightningModule):
 
         # left context in, but it's not used atm
         x = self.final_layer(x, t, context)  # (N, T, patch_size ** 2 * out_channels)
+        del t
 
         x = self.unpatchify(x)  # (N, out_channels, H, W)
         return x
@@ -148,15 +173,20 @@ class DiT_Clipped(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=1e-5)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=4e-4, total_steps=self.trainer.estimated_stepping_batches
+        )
+        return {"optimizer": optimizer,
+                "lr_scheduler": scheduler}
 
     def training_step(self, train_batch, batch_idx):
         img, context = train_batch
 
         with torch.no_grad():
             context = self.encode(context, device=self.secondary_device)
-            context, img = context.to(self.device).to(self.dtype), img.to(self.secondary_device).to(torch.float32)
-            self.vae.to(self.secondary_device).to(torch.float32)
+            context, img = context.to(self.dtype), img.to(self.secondary_device).to(torch.float32)
+            if self.vae.device != self.secondary_device:
+                self.vae.to(self.secondary_device).to(torch.float32)
             x = self.vae.encode(img).latent_dist.sample().mul_(0.18215).to(self.device).to(self.dtype)
 
         t = torch.randint(0, self.diffusion.num_timesteps, (x.shape[0],), device=self.device)
@@ -167,11 +197,14 @@ class DiT_Clipped(pl.LightningModule):
 
         model_kwargs = dict(context=context)
         loss_dict = self.diffusion.training_losses(self, x, t, model_kwargs)
+
+        del x, t, context, model_kwargs
+        torch.cuda.empty_cache()
+        gc.collect()
+
         loss = loss_dict["loss"].mean()  # vb mse loss
 
         self.log("train_loss", loss)
-        self.log("train_bv", loss_dict["vb"].mean())
-        self.log("train_mse", loss_dict["mse"].mean())
 
         return loss
 
@@ -185,8 +218,8 @@ class DiT_Clipped(pl.LightningModule):
     #     loss = loss_dict["loss"].mean()
     #     self.log("val_loss", loss)
 
-    def backward(self, loss, optimizer, optimizer_idx, *args, **kwargs):
+    def backward(self, loss, *args, **kwargs) -> None:
         loss.backward()
 
-    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
+    def optimizer_zero_grad(self, epoch, batch_idx, optimizer):
         optimizer.zero_grad(set_to_none=True)

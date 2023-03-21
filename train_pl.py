@@ -4,9 +4,9 @@ import random
 import torchvision
 import torch
 
-import pytorch_lightning as pl
+import lightning as L
+from lightning.pytorch.callbacks import ModelCheckpoint
 
-from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 
@@ -21,20 +21,23 @@ from modules.training_utils import center_crop_arr
 
 def train_pl(args):
     print("Starting training..")
-    device = torch.device(0)
     secondary_device = torch.device("cpu")
 
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
+        compile_components=False
     )
-    # dataset = HuggingfaceImageDataset(args.hf_dataset_name, args.token, res=args.image_size)
-    dataset = HuggingfaceImageNetDataset(args.token, res=args.image_size)
-    # dataset = torchvision.datasets.CocoCaptions(args.coco_dataset_path + "/train2017/",
-    #                                             args.coco_dataset_path + "/annotations_train/captions_train2017.json",
-    #                                             transform=transform,
-    #                                             target_transform=lambda x: random.choice(x).replace("\n", "").lower())
+
+    # dataset1 = HuggingfaceImageNetDataset(args.token, res=args.image_size)
+    dataset = torchvision.datasets.CocoCaptions(args.coco_dataset_path + "/train2017/",
+                                                args.coco_dataset_path + "/annotations_train/captions_train2017.json",
+                                                transform=transform,
+                                                target_transform=lambda x: random.choice(x).replace("\n", "").lower())
+    # dataset3 = HuggingfaceImageDataset(args.hf_dataset_name, args.token, res=args.image_size)
     # dataset = DummyDataset(res=args.image_size)
+
+    # dataset = torch.utils.data.ConcatDataset([dataset1, dataset2])
 
     state_dict = find_model("pretrained_models/last.ckpt")
     if 'pytorch-lightning_version' in state_dict.keys():
@@ -47,8 +50,10 @@ def train_pl(args):
     model.diffusion = diffusion
     model.vae = vae
     model.secondary_device = secondary_device
+
+    grad_batch_accum = 6
     model_ckpt = ModelCheckpoint(dirpath="ckpts/", monitor="train_loss", save_top_k=2, save_last=True,
-                                 every_n_train_steps=3_000)
+                                 every_n_train_steps=3_000 // grad_batch_accum)
 
     loader_train = DataLoader(
         dataset,
@@ -59,20 +64,22 @@ def train_pl(args):
     )
 
     # update_ema(ema, model.module, decay=0)
-    model.train().to(device)
+    model.train()
     # ema.eval()
 
     torch.set_float32_matmul_precision("high")
-    trainer = pl.Trainer(
-        auto_lr_find=False,
+    trainer = L.Trainer(
         enable_checkpointing=True,
         detect_anomaly=False,
-        log_every_n_steps=50,
-        accelerator='gpu',
-        devices=1,
+        log_every_n_steps=50 // grad_batch_accum,
+        accelerator="auto",
+        devices="auto",
         max_epochs=args.epochs,
-        precision=16 if args.precision == "fp16" else 32,
-        callbacks=[model_ckpt]
+        precision="16-mixed" if args.precision == "fp16" else "32-true",
+        callbacks=[model_ckpt],
+        # StochasticWeightAveraging(swa_lrs=1e-2)],
+        accumulate_grad_batches=grad_batch_accum,
+        # move_metrics_to_cpu=True
     )
 
     trainer.fit(model, loader_train)
@@ -97,7 +104,8 @@ if __name__ == "__main__":
     parser.add_argument("--precision", type=str, choices=["fp16", "fp32"], default="fp16")
     parsed_args = parser.parse_args()
 
-    assert (parsed_args.hf_dataset_name is not None and parsed_args.token is not None) or (parsed_args.coco_dataset_path) is not None, "Either hf token and dataset name or coco dataset path is required"
+    assert (parsed_args.hf_dataset_name is not None and parsed_args.token is not None) or (
+        parsed_args.coco_dataset_path) is not None, "Either hf token and dataset name or coco dataset path is required"
 
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, parsed_args.image_size)),
