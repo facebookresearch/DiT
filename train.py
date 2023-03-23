@@ -113,6 +113,13 @@ def main(args):
     """
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
+    # Variables for monitoring/logging purposes:
+    start_epoch = 0
+    train_steps = 0
+    log_steps = 0
+    running_loss = 0
+    start_time = time()
+
     # Setup DDP:
     dist.init_process_group("nccl")
     assert args.global_batch_size % dist.get_world_size() == 0, f"Batch size must be divisible by world size."
@@ -142,17 +149,28 @@ def main(args):
     model = DiT_models[args.model](
         input_size=latent_size,
         num_classes=args.num_classes
-    )
+    ).to(device)
     # Note that parameter initialization is done within the DiT constructor
-    ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
+    ema = deepcopy(model).to(device) # Create an EMA of the model for use after training
     requires_grad(ema, False)
-    model = DDP(model.to(device), device_ids=[rank])
-    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
-    logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
-
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+    
+    # Load checkpoint
+    if args.ckpt:
+        checkpoint = torch.load(args.ckpt)
+        model.load_state_dict(checkpoint['model'], strict=True)
+        ema.load_state_dict(checkpoint['ema'], strict=True)
+        opt.load_state_dict(checkpoint['opt'])
+        del checkpoint
+        logger.info(f"Using checkpoint: {args.ckpt}")
+    
+    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
+    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    
+    # DDP
+    model = DDP(model, device_ids=[rank])
+    logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup data:
     transform = transforms.Compose([
@@ -179,20 +197,21 @@ def main(args):
         drop_last=True
     )
     logger.info(f"Dataset contains {len(dataset):,} images ({args.data_path})")
-
+    
+    # Initial state
+    if args.ckpt:
+        train_steps = int(args.ckpt.split('/')[-1].split('.')[0])
+        start_epoch = int(train_steps / (len(dataset) / args.global_batch_size))
+        logger.info(f"Initial state: step={train_steps}, epoch={start_epoch}")
+    else:
+        update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights    
+        
     # Prepare models for training:
-    update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
 
-    # Variables for monitoring/logging purposes:
-    train_steps = 0
-    log_steps = 0
-    running_loss = 0
-    start_time = time()
-
     logger.info(f"Training for {args.epochs} epochs...")
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         sampler.set_epoch(epoch)
         logger.info(f"Beginning epoch {epoch}...")
         for x, y in loader:
@@ -265,5 +284,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--ckpt", type=str, default=None)
     args = parser.parse_args()
     main(args)
