@@ -116,6 +116,7 @@ Basic features that would be nice to add:
 - [ ] Resume training from a checkpoint
 - [ ] AMP/bfloat16 support
 
+**🔥 Feature Update** Check out this repository at https://github.com/chuanyangjin/fast-DiT to preview a selection of training speed acceleration and memory saving features including gradient checkpointing, mixed precision training and pre-extrated VAE features. With these advancements, we have achieved a training speed of 0.84 steps/sec for DiT-XL/2 using just a single A100 GPU.
 
 ## Evaluation (FID, Inception Score, etc.)
 
