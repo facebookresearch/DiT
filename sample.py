@@ -45,6 +45,9 @@ def main(args):
 
     # Labels to condition the model with (feel free to change):
     class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
+    # NOTE: We must limit the label < args.num_classes
+    class_labels = list(map(lambda x: x % args.num_classes, class_labels))
+
 
     # Create sampling noise:
     n = len(class_labels)
@@ -53,7 +56,7 @@ def main(args):
 
     # Setup classifier-free guidance:
     z = torch.cat([z, z], 0)
-    y_null = torch.tensor([1000] * n, device=device)
+    y_null = torch.tensor([args.num_classes] * n, device=device)
     y = torch.cat([y, y_null], 0)
     model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
 
