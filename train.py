@@ -30,7 +30,7 @@ import os
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
-
+from dataloader import CelebAMaskDataset
 
 #################################################################################
 #                             Training Helper Functions                         #
@@ -154,14 +154,18 @@ def main(args):
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
 
-    # Setup data:
+    # # Setup data:
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        transforms.Normalize(mean=[131.810/255.0, 106.258/255.0, 92.634/255.0], std=[76.332/255.0, 69.183/255.0, 67.954/255.0], inplace=True)
     ])
-    dataset = ImageFolder(args.data_path, transform=transform)
+    # dataset = ImageFolder(args.data_path, transform=transform)
+
+    dataset = CelebAMaskDataset(label_file='/p/scratch/holistic-vid-westai/ganji1/identity_CelebAHQ.txt',
+                                    root_dir=args.data_path, transform=transform)
+    
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
