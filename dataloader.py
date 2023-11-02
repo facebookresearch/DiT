@@ -1,12 +1,13 @@
 import os
 import torch
 import pandas as pd
-from skimage import io, transform
+# from skimage import io, transform
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import json
-# from torchvision import transforms, utils
+from torchvision import transforms, utils
+from PIL import Image
 
 # Ignore warnings
 import warnings
@@ -37,12 +38,12 @@ class CelebAMaskDataset(Dataset):
 
         img_name = os.path.join(self.root_dir,
                                 names[idx])
-        image = io.imread(img_name)
+        image = Image.open(img_name)
 
-        sample = {'image': image, 'label':labels[idx]}
-         
+        # sample = {'image': image, 'label':labels[idx]}
+        
         if self.transform:
-            sample = self.transform(sample)
+            image = self.transform(image)
 
         return image, labels[idx]
     

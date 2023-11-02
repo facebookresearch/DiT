@@ -97,10 +97,11 @@ def center_crop_arr(pil_image, image_size):
         tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
     )
 
-    arr = np.array(pil_image)
-    crop_y = (arr.shape[0] - image_size) // 2
-    crop_x = (arr.shape[1] - image_size) // 2
-    return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
+    # arr = np.array(pil_image)
+    # crop_y = (arr.shape[0] - image_size) // 2
+    # crop_x = (arr.shape[1] - image_size) // 2
+    # return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
+    return Image.fromarray(np.array(pil_image))
 
 
 #################################################################################
@@ -156,7 +157,7 @@ def main(args):
 
     # # Setup data:
     transform = transforms.Compose([
-        transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
+        # transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=[131.810/255.0, 106.258/255.0, 92.634/255.0], std=[76.332/255.0, 69.183/255.0, 67.954/255.0], inplace=True)
