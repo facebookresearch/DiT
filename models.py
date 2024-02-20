@@ -227,7 +227,7 @@ class DiT(nn.Module):
 
         x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
+        imgs = x.reshape(shape=(x.shape[0], c, h * p, w * p))
         return imgs
 
     def forward(self, x, t, y):
