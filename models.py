@@ -144,8 +144,8 @@ class FinalLayer(nn.Module):
 
 class DiT(nn.Module):
     """
-    Diffusion model with a Transformer backbone. 
-    """  
+    Diffusion model with a Transformer backbone.
+    """
     def __init__(
         self,
         input_size=32,
