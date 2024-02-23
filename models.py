@@ -242,7 +242,6 @@ class DiT(nn.Module):
         N, F, C, H, W = x.shape
         
         x = self.x_embedder(x.reshape(N*F, C, H, W)).reshape(N,  int(H * W / self.patch_size ** 2) * F , -1) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
-        # x should have 4096 tokens for 256x256 images, and 16 frames
 
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
