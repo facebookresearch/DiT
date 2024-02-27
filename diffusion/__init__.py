@@ -17,6 +17,24 @@ def create_diffusion(
     rescale_learned_sigmas=False,
     diffusion_steps=1000
 ):
+    """    Create a diffusion model for the given parameters.
+
+    This function creates a diffusion model based on the provided parameters, including the timestep respacing, noise schedule, use of KL divergence, sigma size, prediction of xstart, learning of sigma, rescaling of learned sigmas, and diffusion steps.
+
+    Args:
+        timestep_respacing (int or list): The respacing of timesteps for diffusion.
+        noise_schedule (str?): The schedule for noise. Defaults to "linear".
+        use_kl (bool?): Whether to use KL divergence. Defaults to False.
+        sigma_small (bool?): Whether sigma is small. Defaults to False.
+        predict_xstart (bool?): Whether to predict xstart. Defaults to False.
+        learn_sigma (bool?): Whether to learn sigma. Defaults to True.
+        rescale_learned_sigmas (bool?): Whether to rescale learned sigmas. Defaults to False.
+        diffusion_steps (int?): The number of diffusion steps. Defaults to 1000.
+
+    Returns:
+        SpacedDiffusion: A diffusion model based on the provided parameters.
+    """
+
     betas = gd.get_named_beta_schedule(noise_schedule, diffusion_steps)
     if use_kl:
         loss_type = gd.LossType.RESCALED_KL

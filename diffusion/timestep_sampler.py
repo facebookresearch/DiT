@@ -11,10 +11,17 @@ import torch.distributed as dist
 
 
 def create_named_schedule_sampler(name, diffusion):
-    """
-    Create a ScheduleSampler from a library of pre-defined samplers.
-    :param name: the name of the sampler.
-    :param diffusion: the diffusion object to sample for.
+    """    Create a ScheduleSampler from a library of pre-defined samplers.
+
+    Args:
+        name (str): The name of the sampler.
+        diffusion (object): The diffusion object to sample for.
+
+    Returns:
+        ScheduleSampler: An instance of ScheduleSampler based on the given name.
+
+    Raises:
+        NotImplementedError: If the given name does not match any pre-defined samplers.
     """
     if name == "uniform":
         return UniformSampler(diffusion)
@@ -36,19 +43,26 @@ class ScheduleSampler(ABC):
 
     @abstractmethod
     def weights(self):
-        """
-        Get a numpy array of weights, one per diffusion step.
+        """        Get a numpy array of weights, one per diffusion step.
         The weights needn't be normalized, but must be positive.
+
+        Returns:
+            numpy.ndarray: An array of weights, one per diffusion step.
         """
 
     def sample(self, batch_size, device):
-        """
-        Importance-sample timesteps for a batch.
-        :param batch_size: the number of timesteps.
-        :param device: the torch device to save to.
-        :return: a tuple (timesteps, weights):
-                 - timesteps: a tensor of timestep indices.
-                 - weights: a tensor of weights to scale the resulting losses.
+        """        Importance-sample timesteps for a batch.
+
+        This function importance-samples timesteps for a batch using the given batch size and torch device.
+
+        Args:
+            batch_size (int): The number of timesteps.
+            device (torch.device): The torch device to save to.
+
+        Returns:
+            tuple: A tuple containing:
+                - timesteps (torch.Tensor): A tensor of timestep indices.
+                - weights (torch.Tensor): A tensor of weights to scale the resulting losses.
         """
         w = self.weights()
         p = w / np.sum(w)
@@ -61,23 +75,37 @@ class ScheduleSampler(ABC):
 
 class UniformSampler(ScheduleSampler):
     def __init__(self, diffusion):
+        """        Initialize the diffusion object with the given parameters.
+
+        Args:
+            diffusion: The diffusion object to be initialized.
+        """
+
         self.diffusion = diffusion
         self._weights = np.ones([diffusion.num_timesteps])
 
     def weights(self):
+        """        Returns the weights associated with the object.
+
+        Returns:
+            object: The weights associated with the object.
+        """
+
         return self._weights
 
 
 class LossAwareSampler(ScheduleSampler):
     def update_with_local_losses(self, local_ts, local_losses):
-        """
-        Update the reweighting using losses from a model.
+        """        Update the reweighting using losses from a model.
+
         Call this method from each rank with a batch of timesteps and the
-        corresponding losses for each of those timesteps.
-        This method will perform synchronization to make sure all of the ranks
-        maintain the exact same reweighting.
-        :param local_ts: an integer Tensor of timesteps.
-        :param local_losses: a 1D Tensor of losses.
+        corresponding losses for each of those timesteps. This method will perform
+        synchronization to make sure all of the ranks maintain the exact same
+        reweighting.
+
+        Args:
+            local_ts (Tensor): An integer Tensor of timesteps.
+            local_losses (Tensor): A 1D Tensor of losses.
         """
         batch_sizes = [
             th.tensor([0], dtype=th.int32, device=local_ts.device)
@@ -104,21 +132,30 @@ class LossAwareSampler(ScheduleSampler):
 
     @abstractmethod
     def update_with_all_losses(self, ts, losses):
-        """
-        Update the reweighting using losses from a model.
+        """        Update the reweighting using losses from a model.
+
         Sub-classes should override this method to update the reweighting
-        using losses from the model.
-        This method directly updates the reweighting without synchronizing
-        between workers. It is called by update_with_local_losses from all
+        using losses from the model. This method directly updates the reweighting
+        without synchronizing between workers. It is called by update_with_local_losses from all
         ranks with identical arguments. Thus, it should have deterministic
         behavior to maintain state across workers.
-        :param ts: a list of int timesteps.
-        :param losses: a list of float losses, one per timestep.
+
+        Args:
+            ts (list): A list of int timesteps.
+            losses (list): A list of float losses, one per timestep.
         """
 
 
 class LossSecondMomentResampler(LossAwareSampler):
     def __init__(self, diffusion, history_per_term=10, uniform_prob=0.001):
+        """        Initialize the object with diffusion, history_per_term, and uniform_prob.
+
+        Args:
+            diffusion: The diffusion object.
+            history_per_term (int): Number of history per term.
+            uniform_prob (float): The probability of uniform distribution.
+        """
+
         self.diffusion = diffusion
         self.history_per_term = history_per_term
         self.uniform_prob = uniform_prob
@@ -128,6 +165,15 @@ class LossSecondMomentResampler(LossAwareSampler):
         self._loss_counts = np.zeros([diffusion.num_timesteps], dtype=np.int)
 
     def weights(self):
+        """        Calculate the weights for each timestep based on the loss history.
+
+        If the model is not warmed up, it returns an array of ones with the same length as the number of timesteps.
+        Otherwise, it calculates the weights based on the root mean square of the loss history and normalizes them.
+
+        Returns:
+            numpy.ndarray: An array of weights for each timestep.
+        """
+
         if not self._warmed_up():
             return np.ones([self.diffusion.num_timesteps], dtype=np.float64)
         weights = np.sqrt(np.mean(self._loss_history ** 2, axis=-1))
@@ -137,6 +183,17 @@ class LossSecondMomentResampler(LossAwareSampler):
         return weights
 
     def update_with_all_losses(self, ts, losses):
+        """        Update the loss history with all losses for given time steps.
+
+        This method updates the loss history with all losses for the given time steps.
+        If the number of losses for a time step reaches the maximum history per term,
+        the oldest loss term is shifted out.
+
+        Args:
+            ts (list): A list of time steps.
+            losses (list): A list of loss values corresponding to the time steps.
+        """
+
         for t, loss in zip(ts, losses):
             if self._loss_counts[t] == self.history_per_term:
                 # Shift out the oldest loss term.
@@ -147,4 +204,12 @@ class LossSecondMomentResampler(LossAwareSampler):
                 self._loss_counts[t] += 1
 
     def _warmed_up(self):
+        """        Check if the model has been warmed up.
+
+        Returns True if the loss counts are equal to the history per term for all terms, indicating that the model has been warmed up.
+
+        Returns:
+            bool: True if the model has been warmed up, False otherwise.
+        """
+
         return (self._loss_counts == self.history_per_term).all()

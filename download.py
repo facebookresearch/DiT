@@ -16,8 +16,16 @@ pretrained_models = {'DiT-XL-2-512x512.pt', 'DiT-XL-2-256x256.pt'}
 
 
 def find_model(model_name):
-    """
-    Finds a pre-trained DiT model, downloading it if necessary. Alternatively, loads a model from a local path.
+    """    Finds a pre-trained DiT model, downloading it if necessary. Alternatively, loads a model from a local path.
+
+    Args:
+        model_name (str): The name of the model or the path to the local model checkpoint.
+
+    Returns:
+        dict or torch.nn.Module: The pre-trained model if found, or the loaded model checkpoint.
+
+    Raises:
+        AssertionError: If the model_name is not found in the pre-trained models and is also not a valid local path.
     """
     if model_name in pretrained_models:  # Find/download our pre-trained DiT checkpoints
         return download_model(model_name)
@@ -30,8 +38,17 @@ def find_model(model_name):
 
 
 def download_model(model_name):
-    """
-    Downloads a pre-trained DiT model from the web.
+    """    Downloads a pre-trained DiT model from the web.
+
+    Args:
+        model_name (str): The name of the pre-trained model to be downloaded.
+
+    Returns:
+        torch.nn.Module: The downloaded pre-trained model.
+
+    Raises:
+        AssertionError: If the specified model_name is not in the list of pretrained_models.
+        FileNotFoundError: If the local_path does not exist.
     """
     assert model_name in pretrained_models
     local_path = f'pretrained_models/{model_name}'
