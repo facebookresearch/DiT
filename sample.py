@@ -19,6 +19,18 @@ import argparse
 
 
 def main(args):
+    """    Setup PyTorch, load a model, create sampling noise, and sample images.
+
+    This function sets up PyTorch, loads a model, creates sampling noise, and samples images using the provided arguments.
+
+    Args:
+        args (argparse.Namespace): The input arguments for the function.
+
+
+    Raises:
+        AssertionError: If the specified model, image size, or number of classes do not match the expected values.
+    """
+
     # Setup PyTorch:
     torch.manual_seed(args.seed)
     torch.set_grad_enabled(False)
