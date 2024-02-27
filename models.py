@@ -17,6 +17,19 @@ from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
 
 
 def modulate(x, shift, scale):
+    """    Modulate the input tensor by applying shift and scale.
+
+    Modulates the input tensor 'x' by adding the shift tensor and multiplying by the scale tensor.
+
+    Args:
+        x (tensor): Input tensor to be modulated.
+        shift (tensor): Tensor representing the shift to be added.
+        scale (tensor): Tensor representing the scale to be applied.
+
+    Returns:
+        tensor: The modulated tensor.
+    """
+
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
@@ -29,6 +42,13 @@ class TimestepEmbedder(nn.Module):
     Embeds scalar timesteps into vector representations.
     """
     def __init__(self, hidden_size, frequency_embedding_size=256):
+        """        Initialize the object with given hidden size and frequency embedding size.
+
+        Args:
+            hidden_size (int): The size of the hidden layer.
+            frequency_embedding_size (int?): The size of the frequency embedding. Defaults to 256.
+        """
+
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(frequency_embedding_size, hidden_size, bias=True),
@@ -39,13 +59,17 @@ class TimestepEmbedder(nn.Module):
 
     @staticmethod
     def timestep_embedding(t, dim, max_period=10000):
-        """
-        Create sinusoidal timestep embeddings.
-        :param t: a 1-D Tensor of N indices, one per batch element.
-                          These may be fractional.
-        :param dim: the dimension of the output.
-        :param max_period: controls the minimum frequency of the embeddings.
-        :return: an (N, D) Tensor of positional embeddings.
+        """        Create sinusoidal timestep embeddings.
+
+        This function creates sinusoidal timestep embeddings based on the input parameters.
+
+        Args:
+            t (Tensor): A 1-D Tensor of N indices, one per batch element. These may be fractional.
+            dim (int): The dimension of the output.
+            max_period (int?): Controls the minimum frequency of the embeddings. Defaults to 10000.
+
+        Returns:
+            Tensor: An (N, D) Tensor of positional embeddings.
         """
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         half = dim // 2
@@ -59,6 +83,15 @@ class TimestepEmbedder(nn.Module):
         return embedding
 
     def forward(self, t):
+        """        Forward pass of the model to calculate the time embedding.
+
+        Args:
+            t (tensor): Input tensor representing time.
+
+        Returns:
+            tensor: The time embedding tensor.
+        """
+
         t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
         t_emb = self.mlp(t_freq)
         return t_emb
@@ -69,6 +102,14 @@ class LabelEmbedder(nn.Module):
     Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance.
     """
     def __init__(self, num_classes, hidden_size, dropout_prob):
+        """        Initialize the model with the specified parameters.
+
+        Args:
+            num_classes (int): The number of classes for classification.
+            hidden_size (int): The size of the hidden layer.
+            dropout_prob (float): The probability of dropout.
+        """
+
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
         self.embedding_table = nn.Embedding(num_classes + use_cfg_embedding, hidden_size)
@@ -76,8 +117,18 @@ class LabelEmbedder(nn.Module):
         self.dropout_prob = dropout_prob
 
     def token_drop(self, labels, force_drop_ids=None):
-        """
-        Drops labels to enable classifier-free guidance.
+        """        Drops labels to enable classifier-free guidance.
+
+        This function drops labels to enable classifier-free guidance. If force_drop_ids is not provided, it generates drop_ids based on a random probability.
+        If force_drop_ids is provided, it generates drop_ids based on the values of force_drop_ids.
+        It then replaces the dropped labels with the number of classes and returns the modified labels.
+
+        Args:
+            labels (torch.Tensor): The input labels.
+            force_drop_ids (torch.Tensor?): A tensor indicating whether to force drop specific labels.
+
+        Returns:
+            torch.Tensor: The modified labels after dropping.
         """
         if force_drop_ids is None:
             drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
@@ -87,6 +138,19 @@ class LabelEmbedder(nn.Module):
         return labels
 
     def forward(self, labels, train, force_drop_ids=None):
+        """        Forward pass through the neural network model.
+
+        This method takes input labels and performs a forward pass through the neural network model. If training and dropout is enabled, or if force_drop_ids is provided, it applies token dropout to the input labels before obtaining their embeddings from the embedding table.
+
+        Args:
+            labels (tensor): Input labels for the forward pass.
+            train (bool): Flag indicating whether the model is in training mode.
+            force_drop_ids (list?): List of indices to force dropout on.
+
+        Returns:
+            tensor: Embeddings obtained from the embedding table.
+        """
+
         use_dropout = self.dropout_prob > 0
         if (train and use_dropout) or (force_drop_ids is not None):
             labels = self.token_drop(labels, force_drop_ids)
@@ -103,6 +167,15 @@ class DiTBlock(nn.Module):
     A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+        """        Initializes the model with the given parameters.
+
+        Args:
+            hidden_size (int): The dimension of the hidden state.
+            num_heads (int): The number of attention heads.
+            mlp_ratio (float?): The ratio of the hidden size in the feedforward network. Defaults to 4.0.
+            **block_kwargs: Additional keyword arguments for the attention block.
+        """
+
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
@@ -116,6 +189,19 @@ class DiTBlock(nn.Module):
         )
 
     def forward(self, x, c):
+        """        Applies the forward pass of the module.
+
+        Modulates the input tensor `x` using the modulation parameters obtained from the conditioning tensor `c`.
+        The modulation parameters are used to modulate the normalized input tensor and then applied to the input tensor using attention and MLP operations.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+            c (torch.Tensor): Conditioning tensor.
+
+        Returns:
+            torch.Tensor: The modulated output tensor.
+        """
+
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
@@ -127,6 +213,14 @@ class FinalLayer(nn.Module):
     The final layer of DiT.
     """
     def __init__(self, hidden_size, patch_size, out_channels):
+        """        Initialize the parameters for the model.
+
+        Args:
+            hidden_size (int): The size of the hidden layer.
+            patch_size (int): The size of the patch.
+            out_channels (int): The number of output channels.
+        """
+
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)
@@ -136,6 +230,16 @@ class FinalLayer(nn.Module):
         )
 
     def forward(self, x, c):
+        """        Applies forward pass through the neural network with adaptive layer normalization modulation.
+
+        Args:
+            x (tensor): Input tensor.
+            c (tensor): Modulation tensor.
+
+        Returns:
+            tensor: Output tensor after forward pass.
+        """
+
         shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
         x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)
@@ -159,6 +263,21 @@ class DiT(nn.Module):
         num_classes=1000,
         learn_sigma=True,
     ):
+        """        Initializes a Deep into Time (DiT) model with the specified parameters.
+
+        Args:
+            input_size (int): The size of the input.
+            patch_size (int): The size of the patch.
+            in_channels (int): The number of input channels.
+            hidden_size (int): The size of the hidden layer.
+            depth (int): The depth of the model.
+            num_heads (int): The number of attention heads.
+            mlp_ratio (float): The ratio of the hidden layer size to the input size.
+            class_dropout_prob (float): The dropout probability for the class.
+            num_classes (int): The number of output classes.
+            learn_sigma (bool): Whether to learn sigma.
+        """
+
         super().__init__()
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
@@ -180,8 +299,23 @@ class DiT(nn.Module):
         self.initialize_weights()
 
     def initialize_weights(self):
+        """        Initialize the weights of the model.
+
+        This function initializes the weights of the model including transformer layers, position embedding, patch embedding,
+        label embedding table, timestep embedding MLP, and modulation layers in DiT blocks.
+
+        Args:
+            self: The model instance.
+        """
+
         # Initialize transformer layers:
         def _basic_init(module):
+            """            Initialize the weights and biases of a linear layer using Xavier uniform initialization.
+
+            Args:
+                module (torch.nn.Module): The module to initialize.
+            """
+
             if isinstance(module, nn.Linear):
                 torch.nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
@@ -216,9 +350,16 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
     def unpatchify(self, x):
-        """
-        x: (N, T, patch_size**2 * C)
-        imgs: (N, H, W, C)
+        """        Unpatchify the input tensor to reconstruct the image.
+
+        Args:
+            x (tensor): Input tensor of shape (N, T, patch_size**2 * C).
+
+        Returns:
+            tensor: Reconstructed images of shape (N, H, W, C).
+
+        Raises:
+            AssertionError: If the product of height and width does not match the second dimension of the input tensor.
         """
         c = self.out_channels
         p = self.x_embedder.patch_size[0]
@@ -231,11 +372,15 @@ class DiT(nn.Module):
         return imgs
 
     def forward(self, x, t, y):
-        """
-        Forward pass of DiT.
-        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
-        t: (N,) tensor of diffusion timesteps
-        y: (N,) tensor of class labels
+        """        Forward pass of DiT.
+
+        Args:
+            x (torch.Tensor): (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
+            t (torch.Tensor): (N,) tensor of diffusion timesteps
+            y (torch.Tensor): (N,) tensor of class labels
+
+        Returns:
+            torch.Tensor: (N, out_channels, H, W) tensor representing the output of the forward pass
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)                   # (N, D)
@@ -248,8 +393,18 @@ class DiT(nn.Module):
         return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
-        """
-        Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance.
+        """        Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance.
+
+        This method performs the forward pass of DiT while also batching the unconditional forward pass for classifier-free guidance.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+            t (torch.Tensor): Target tensor.
+            y (torch.Tensor): Output tensor.
+            cfg_scale (float): Scale factor for conditional guidance.
+
+        Returns:
+            torch.Tensor: Concatenated tensor of conditional and unconditional guidance.
         """
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
@@ -272,10 +427,18 @@ class DiT(nn.Module):
 # https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
-    """
-    grid_size: int of the grid height and width
-    return:
-    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    """    Generate 2D sine/cosine positional embeddings for a grid.
+
+    This function takes the embedding dimension, grid size, and optional parameters to generate 2D sine/cosine positional embeddings for a grid. It first creates a grid using the provided grid size, then calculates the sine/cosine positional embeddings based on the grid.
+
+    Args:
+        embed_dim (int): The dimension of the positional embeddings.
+        grid_size (int): The height and width of the grid.
+        cls_token (bool?): Whether to include a cls_token. Defaults to False.
+        extra_tokens (int?): The number of extra tokens to include. Defaults to 0.
+
+    Returns:
+        numpy.ndarray: The 2D sine/cosine positional embeddings for the grid.
     """
     grid_h = np.arange(grid_size, dtype=np.float32)
     grid_w = np.arange(grid_size, dtype=np.float32)
@@ -290,6 +453,19 @@ def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=
 
 
 def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
+    """    Get 2D sine-cosine positional embeddings from a grid.
+
+    This function takes the embedding dimension and a 2D grid as input and returns the positional embeddings
+    for the grid using sine and cosine functions.
+
+    Args:
+        embed_dim (int): The embedding dimension, must be divisible by 2.
+        grid (tuple): A tuple containing the 2D grid dimensions.
+
+    Returns:
+        numpy.ndarray: The positional embeddings for the input grid.
+    """
+
     assert embed_dim % 2 == 0
 
     # use half of dimensions to encode grid_h
@@ -301,10 +477,17 @@ def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
 
 
 def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
-    """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,)
-    out: (M, D)
+    """    Encode positions into a 1D sinusoidal-cosine positional embedding grid.
+
+    Args:
+        embed_dim (int): Output dimension for each position.
+        pos (ndarray): A list of positions to be encoded: size (M,).
+
+    Returns:
+        ndarray: The encoded positional embedding grid of shape (M, D), where D is the output dimension.
+
+    Raises:
+        AssertionError: If embed_dim is not divisible by 2.
     """
     assert embed_dim % 2 == 0
     omega = np.arange(embed_dim // 2, dtype=np.float64)
@@ -326,39 +509,167 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
 #################################################################################
 
 def DiT_XL_2(**kwargs):
+    """    DiT model with extra large configuration and patch size of 2.
+
+    This function returns a DiT model with a depth of 28, hidden size of 1152, patch size of 2, and 16 attention heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        DiT: A DiT model with the specified configuration.
+    """
+
     return DiT(depth=28, hidden_size=1152, patch_size=2, num_heads=16, **kwargs)
 
 def DiT_XL_4(**kwargs):
+    """    Create a DiT (Diversity Transformer) model with extra large configuration using custom keyword arguments.
+
+    This function creates a Diversity Transformer model with extra large configuration by setting the depth to 28, hidden_size to 1152, patch_size to 4, and num_heads to 16, along with any additional custom keyword arguments provided.
+
+    Args:
+        **kwargs: Additional custom keyword arguments for configuring the model.
+
+    Returns:
+        DiT: A Diversity Transformer model with extra large configuration.
+    """
+
     return DiT(depth=28, hidden_size=1152, patch_size=4, num_heads=16, **kwargs)
 
 def DiT_XL_8(**kwargs):
+    """    Create a DiT (Data-efficient image Transformer) model with extra large configuration.
+
+    This function creates a DiT model with the specified parameters, including depth, hidden size, patch size, and number of heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        DiT: A Data-efficient image Transformer model with extra large configuration.
+    """
+
     return DiT(depth=28, hidden_size=1152, patch_size=8, num_heads=16, **kwargs)
 
 def DiT_L_2(**kwargs):
+    """    Create a DiT model with a patch size of 2.
+
+    This function creates a Distransformer (DiT) model with a specified depth, hidden size, patch size, and number of heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        DiT: A Distransformer model with the specified parameters.
+    """
+
     return DiT(depth=24, hidden_size=1024, patch_size=2, num_heads=16, **kwargs)
 
 def DiT_L_4(**kwargs):
+    """    Create a DiT model with a depth of 24, hidden size of 1024, patch size of 4, and 16 attention heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        DiT: An instance of the DiT model.
+    """
+
     return DiT(depth=24, hidden_size=1024, patch_size=4, num_heads=16, **kwargs)
 
 def DiT_L_8(**kwargs):
+    """    Create a DiT model with a patch size of 8.
+
+    This function creates a Distransformer (DiT) model with a specified depth, hidden size, patch size, and number of heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        torch.nn.Module: A DiT model with the specified parameters.
+    """
+
     return DiT(depth=24, hidden_size=1024, patch_size=8, num_heads=16, **kwargs)
 
 def DiT_B_2(**kwargs):
+    """    Create a DiT model with specific configuration.
+
+    This function creates a Distransformer (DiT) model with the specified configuration parameters.
+
+    Args:
+        **kwargs: Additional keyword arguments for configuring the DiT model.
+
+    Returns:
+        DiT: A Distransformer model with the specified configuration.
+    """
+
     return DiT(depth=12, hidden_size=768, patch_size=2, num_heads=12, **kwargs)
 
 def DiT_B_4(**kwargs):
+    """    Create a Diverse Transformer model with a patch size of 4.
+
+    This function creates a Diverse Transformer model with the specified depth, hidden size, patch size, and number of heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        DiT: A Diverse Transformer model with the specified configuration.
+    """
+
     return DiT(depth=12, hidden_size=768, patch_size=4, num_heads=12, **kwargs)
 
 def DiT_B_8(**kwargs):
+    """    Create a DiT model with a depth of 12, hidden size of 768, patch size of 8, and 12 attention heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for the DiT model.
+
+    Returns:
+        DiT: A DiT model with the specified configuration.
+    """
+
     return DiT(depth=12, hidden_size=768, patch_size=8, num_heads=12, **kwargs)
 
 def DiT_S_2(**kwargs):
+    """    Create a DiT model with specific configuration.
+
+    This function creates a DiT (Data-efficient image Transformer) model with the specified configuration parameters.
+
+    Args:
+        **kwargs: Additional keyword arguments for configuring the DiT model.
+
+    Returns:
+        DiT: A Data-efficient image Transformer model.
+    """
+
     return DiT(depth=12, hidden_size=384, patch_size=2, num_heads=6, **kwargs)
 
 def DiT_S_4(**kwargs):
+    """    Create a DiT model with specific configuration settings.
+
+    This function creates a Distransformer (DiT) model with the specified depth, hidden size, patch size, and number of heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for configuring the DiT model.
+
+    Returns:
+        DiT: A Distransformer model with the specified configuration settings.
+    """
+
     return DiT(depth=12, hidden_size=384, patch_size=4, num_heads=6, **kwargs)
 
 def DiT_S_8(**kwargs):
+    """    Create a DiT model with specific configuration parameters.
+
+    This function creates a Diverse Transformer (DiT) model with the specified configuration parameters, including depth, hidden size, patch size, and number of heads.
+
+    Args:
+        **kwargs: Additional keyword arguments for configuring the DiT model.
+
+    Returns:
+        DiT: A Diverse Transformer model with the specified configuration.
+    """
+
     return DiT(depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
 
 
