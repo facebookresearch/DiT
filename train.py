@@ -30,7 +30,8 @@ import os
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
-
+from einops import rearrange
+import torchvision
 
 #################################################################################
 #                             Training Helper Functions                         #
@@ -155,13 +156,28 @@ def main(args):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
 
     # Setup data:
-    transform = transforms.Compose([
-        transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
-    ])
-    dataset = ImageFolder(args.data_path, transform=transform)
+    # transform = transforms.Compose([
+    #     transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
+    #     transforms.RandomHorizontalFlip(),
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+    # ])
+
+    transform = torchvision.transforms.Compose([ 
+     transforms.Resize(args.image_size, args.image_size),
+     transforms.ToTensor()
+ ]) 
+
+    #dataset = ImageFolder(args.data_path, transform=transform)
+    dataset = torchvision.datasets.UCF101(
+        args.data_path,
+        f"{args.data_path}/ucfTrainTestlist",
+        16,
+        5,
+        output_format="FCHW",
+        transform=transform
+    )
+    
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -195,12 +211,16 @@ def main(args):
     for epoch in range(args.epochs):
         sampler.set_epoch(epoch)
         logger.info(f"Beginning epoch {epoch}...")
-        for x, y in loader:
+        for x, _, y in loader:
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
+                b = x.size(0)
+                x = rearrange(x, 'b f c h w -> (b f) c h w').contiguous() # this borrows from https://github.com/Vchitect/Latte/blob/main/train.py
                 x = vae.encode(x).latent_dist.sample().mul_(0.18215)
+                x = rearrange(x, '(b f) c h w -> b f c h w', b=b).contiguous() # this borrows from https://github.com/Vchitect/Latte/blob/main/train.py
+                
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
@@ -259,7 +279,7 @@ if __name__ == "__main__":
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
-    parser.add_argument("--global-batch-size", type=int, default=256)
+    parser.add_argument("--global-batch-size", type=int, default=8)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)

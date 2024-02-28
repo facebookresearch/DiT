@@ -14,7 +14,7 @@ import torch.nn as nn
 import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
-
+from einops import rearrange
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -149,6 +149,7 @@ class DiT(nn.Module):
     def __init__(
         self,
         input_size=32,
+        num_frames=16, # Number of frames in the diffusion process
         patch_size=2,
         in_channels=4,
         hidden_size=1152,
@@ -165,13 +166,14 @@ class DiT(nn.Module):
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
+        self.num_frames = num_frames
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
         num_patches = self.x_embedder.num_patches
         # Will use fixed sin-cos embedding:
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches * num_frames, hidden_size), requires_grad=False)
 
         self.blocks = nn.ModuleList([
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
@@ -189,7 +191,7 @@ class DiT(nn.Module):
         self.apply(_basic_init)
 
         # Initialize (and freeze) pos_embed by sin-cos embedding:
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.x_embedder.num_patches ** 0.5))
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int((self.x_embedder.num_patches * self.num_frames) ** 0.5))
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
         # Initialize patch_embed like nn.Linear (instead of nn.Conv2d):
@@ -233,18 +235,27 @@ class DiT(nn.Module):
     def forward(self, x, t, y):
         """
         Forward pass of DiT.
-        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
+        x: (N, F, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (N,) tensor of diffusion timesteps
         y: (N,) tensor of class labels
         """
-        x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
+        N, F, C, H, W = x.shape
+        
+        x = rearrange(x, 'n f c h w -> (n f) c h w') # Put frames in batch dimension
+        x = self.x_embedder(x)  # (N, T, D), where T = H * W / patch_size ** 2
+        x = rearrange(x, '(n f) t d -> n (f t) d', f=F) + self.pos_embed # unpack frames from batch dimension and put them in token dimension
+
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y                                # (N, D)
         for block in self.blocks:
             x = block(x, c)                      # (N, T, D)
-        x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
+        x = self.final_layer(x, c)               # (N, T, patch_size ** 2 * out_channels)
+        
+        x = rearrange(x, 'n (f t) l -> (n f) t l', f=F) # Put frames in batch dimensions again to unpatch
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
+        x = rearrange(x, '(n f) c h w -> n f c h w', f=F) # after unpach, remove frames from batch dimension
+
         return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
