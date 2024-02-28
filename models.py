@@ -14,7 +14,7 @@ import torch.nn as nn
 import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
-
+from einops import rearrange
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -219,17 +219,17 @@ class DiT(nn.Module):
 
     def unpatchify(self, x):
         """
-        x: (N, T * num_frames, patch_size**2 * C)
+        x: (N, T, patch_size**2 * C)
         imgs: (N, H, W, C)
         """
         c = self.out_channels
         p = self.x_embedder.patch_size[0]
-        h = w = int((x.shape[1] / self.num_frames) ** 0.5)
-        assert h * w == (x.shape[1] / self.num_frames)
+        h = w = int(x.shape[1] ** 0.5)
+        assert h * w == x.shape[1]
 
-        x = x.reshape(shape=(x.shape[0], self.num_frames, h, w, p, p, c))
-        x = torch.einsum('nfhwpqc->nfchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], self.num_frames, c, h * p, h * p))
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
+        x = torch.einsum('nhwpqc->nchpwq', x)
+        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
 
     def forward(self, x, t, y):
@@ -241,7 +241,9 @@ class DiT(nn.Module):
         """
         N, F, C, H, W = x.shape
         
-        x = self.x_embedder(x.reshape(N*F, C, H, W)).reshape(N,  int(H * W / self.patch_size ** 2) * F , -1) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
+        x = rearrange(x, 'n f c h w -> (n f) c h w') # Put frames in batch dimension
+        x = self.x_embedder(x)  # (N, T, D), where T = H * W / patch_size ** 2
+        x = rearrange(x, '(n f) t d -> n (f t) d', f=F) + self.pos_embed # unpack frames from batch dimension and put them in token dimension
 
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
@@ -249,7 +251,11 @@ class DiT(nn.Module):
         for block in self.blocks:
             x = block(x, c)                      # (N, T, D)
         x = self.final_layer(x, c)               # (N, T, patch_size ** 2 * out_channels)
+        
+        x = rearrange(x, 'n (f t) l -> (n f) t l', f=F) # Put frames in batch dimensions again to unpatch
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
+        x = rearrange(x, '(n f) c h w -> n f c h w', f=F) # after unpach, remove frames from batch dimension
+
         return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
